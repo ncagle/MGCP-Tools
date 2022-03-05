@@ -1,2 +1,2 @@
-# Pull SDE Local
- An ArcPy script meant to pull local copy of an SDE dataset by applying an attribute query and splitting data along a given AOI boundary.
+# MGCP Tools
+ A set of tools for MGCP data to clean features and populate metadata
