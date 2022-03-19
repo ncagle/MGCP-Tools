@@ -1,7 +1,7 @@
-# ======================= #
-# Populate SDV and UID v5 #
-# Nat Cagle 2022-02-15    #
-# ======================= #
+# ============================ #
+# Populate Feature Metadata v6 #
+# Nat Cagle 2022-03-11         #
+# ============================ #
 import arcpy
 from arcpy import AddMessage as write
 from datetime import datetime
@@ -30,11 +30,18 @@ MGCP = arcpy.GetParameterAsText(0) # Get MGCP dataset
 img_foot = arcpy.GetParameterAsText(1) # Get imagery footprint shapefile
 run_fin_tool = arcpy.GetParameter(2) # Check you ran the MGCP Finishing Tool first.
 actual_sdv = arcpy.GetParameter(3) # Option to still use the hard work I put into indentifying and updating spatially accurate feature source dates
+# Geonames date: Database most recent update on: https://geonames.nga.mil/gns/html
+geo_check = arcpy.GetParameter(4) # Did you use geonames checkbox
+geo_shp_check = arcpy.GetParameter(5) # Do you only have access to a Geonames shapefile in stead of a FC for some incredibly inconvenient reason?
+geo_file = arcpy.GetParameterAsText(6)
 
 if run_fin_tool == False:
+	write("\n\n\n**********************************************************")
 	write("Please run the MGCP Finishing Tool before Populate SDV and UID.")
 	write("This will prevent NULL geometries from interfering with the SDV calculation.")
+	write("**********************************************************\n\n\n")
 	sys.exit(0)
+
 
 arcpy.env.workspace = MGCP
 workspace = arcpy.env.workspace
@@ -42,10 +49,61 @@ arcpy.env.overwriteOutput = True
 featureclass = arcpy.ListFeatureClasses()
 featureclass.sort()
 
-fc_fields = ['sdv', 'SHAPE@', 'OID@'] #Source Date Value(SDV) field and the true centroid token of each feature to find which footprint it mostly overlaps
+
+if geo_check: # geo_date_new
+	write("\nImporting Geonames Source data...")
+	geo_dates = []
+	# Searches through the Geonames file modify dates and creates a list in the YYYY-MM-DD format
+	geo_field = 'MODIFY_DATE'
+	geo_field_names = [f.name for f in arcpy.ListFields(geo_file)]
+	# try:
+	if 'MODIFY_DATE' in geo_field_names:
+		with arcpy.da.SearchCursor(geo_file, geo_field) as geo:
+			write('\nSearching Geonames feature class for \'MODIFY_DATE\' field.')
+			for row in geo:
+				#field_val = row[0]
+				#write_info("field_val row[0]", field_val)
+				date_field = str(row[0])
+				feat_date = datetime.strptime(date_field, "%m/%d/%Y")
+				date = feat_date.strftime("%Y-%m-%d")
+				geo_dates.append(date)
+	elif 'MODIFY_DAT' in geo_field_names:
+		if not geo_shp_check:
+			write("**********************************************************")
+			write("There was an issue with the Geonames Source feature class. Attempting to correct for broken field names...\n")
+			write("It seems someone tried to just load a Geonames shapefile into a GDB instead of properly downloading the data from the NGA GEOnet Name Service and constructing the database. :]\nThe ESRI Geonames Locator tool can be found here: https://solutions.arcgis.com/defense/help/geonames-locator/\nProper data preparation can save a significant amount of time on projects.\nInconsistency in database standards is the leading cause of early heart failure in developers.\nExcel is not a database, and a shapefile is not a feature class. Do better.")
+			write("**********************************************************")
+		geo_field = 'MODIFY_DAT'
+		with arcpy.da.SearchCursor(geo_file, geo_field) as geo:
+				write('\nSearching Geonames shapefile for \'MODIFY_DAT\' field.')
+				write("")
+				for row in geo:
+					date_field = row[0]
+					if type(date_field) == datetime:
+						date = date_field.strftime("%Y-%m-%d")
+						geo_dates.append(date)
+						continue
+					else:
+						feat_date = datetime.strptime(date_field, "%m/%d/%Y")
+						date = feat_date.strftime("%Y-%m-%d")
+						geo_dates.append(date)
+	# except:
+	# 	write("There is an issue with the field name formatting of the Geonames Source.\nPlease make sure it has been properly downloaded from the NGA GEOnet Name Service. A file geodatabase is the best option. :)\nThe ESRI Geonames Locator tool can be found here: https://solutions.arcgis.com/defense/help/geonames-locator/\nProper data preparation can save a significant amount of time on projects.")
+	# 	sys.exit(0)
+	# Find newest Geonames modify dates
+	geo_date_new = max(geo_dates)
+	write("Latest NGA GEOnet Names Server (GNS) database update date in Geonames source: {0}".format(geo_date_new))
+
+
+sdv_fields = ['sdv', 'SHAPE@', 'OID@'] #Source Date Value(SDV) field and the true centroid token of each feature to find which footprint it mostly overlaps
+fc_fields = ['acc', 'ccn', 'sdp', 'srt', 'txt']
+textp_fields = ['acc', 'ccn', 'sdp', 'srt', 'txt', 'sdv']
 img_fields = ['Acquisitio', 'SHAPE@'] #Acquisition date for the imagery footprint polygons and the shape token for comparisons
 
-populated = lambda x: x is not None and str(x).strip() != '' # Finds empty fields.
+
+# Explicit is better than implicit
+# Lambda function works better than "if not fieldname:", which can falsely catch 0.
+populated = lambda x: x is not None and str(x).strip() != '' # Function that returns boolean of if input field is populated or empty
 
 def debug_view(**kwargs): # Input variable to view info in script output
 	# Set to boolean to only run once for the given variable
@@ -65,7 +123,9 @@ def debug_view(**kwargs): # Input variable to view info in script output
 		else:
 			return
 
-if actual_sdv:
+
+
+if actual_sdv: #Deprecated unfortunately. Needs refactoring.
 	''''''''' Footprint Search and Update '''''''''
 	for fc in featureclass:
 		arcpy.MakeTableView_management(fc, "fc_table")
@@ -131,7 +191,7 @@ else:
 		img_date_old = min(img_dates) # Harris means oldest when they say "earliest". What a failing of a word in the english language.
 		img_date_old_debug = False
 
-		with arcpy.da.UpdateCursor(fc, fc_fields) as fcu:
+		with arcpy.da.UpdateCursor(fc, sdv_fields) as fcu:
 			# For each feature in the feature class, blanket update the SDV field with the oldest imagery date cz fuck accuracy, we want consistency.
 			count = 0
 			unknown_err_list = []
@@ -183,10 +243,6 @@ else:
 ''''''''' Update UFI Values '''''''''
 # Iterate through all features and update the uid field with uuid4 random values
 uidcount = 0
-# Explicit is better than implicit
-# Lambda function works better than "if not fieldname:", which can falsely catch 0.
-populated = lambda x: x is not None and str(x).strip() != '' # Function that returns boolean of if input field is populated or empty
-
 for fc in featureclass:
 	feat_count = int(arcpy.GetCount_management(fc).getOutput(0))
 	if feat_count == 0:
@@ -217,10 +273,53 @@ for fc in featureclass:
 		sys.exit(0)
 
 
+
+''''''''' Populate Feature Metadata '''''''''
+acc = 1 # If not already
+ccn = r"Copyright 2014 by the National Geospatial-Intelligence Agency, U.S. Government.  No domestic copyright claimed under Title 17 U.S.C. All rights reserved."
+txt = 'N_A' # Unless populated
+for fc in featureclass:
+	if str(fc) == 'TextP':
+		# textp_fields = ['acc', 'ccn', 'sdp', 'srt', 'txt', 'sdv']
+		sdp = "GeoNames"
+		srt = 25
+		write("**Assigning {0} metadata to {1} feature class for Named Location Points.".format(sdp, fc))
+		with arcpy.da.UpdateCursor(fc, textp_fields) as ucursor:
+			for urow in ucursor:
+				if urow[0] != 1:
+					urow[0] = acc
+				urow[1] = ccn
+				urow[2] = sdp
+				urow[3] = srt
+				if not populated(urow[4]):
+					urow[4] = txt
+				if geo_check:
+					urow[5] = geo_date_new
+				ucursor.updateRow(urow)
+		continue
+
+	# fc_fields = ['acc', 'ccn', 'sdp', 'srt', 'txt']
+	sdp = "Very High Resolution Commercial Monoscopic Imagery"
+	srt = 110
+	write("Assigning {0} metadata to {1} feature class.".format(sdp, fc))
+	with arcpy.da.UpdateCursor(fc, fc_fields) as ucursor:
+		for urow in ucursor:
+			if urow[0] != 1:
+				urow[0] = acc
+			urow[1] = ccn
+			urow[2] = sdp
+			urow[3] = srt
+			if not populated(urow[4]):
+				urow[4] = txt
+			ucursor.updateRow(urow)
+
+
+
 if actual_sdv:
 	write("\n\nUpdated all feature SDV fields based on their spatial relation with the provided Imagery Footprint acquisition dates.")
 write("\n\nUpdated feature SDV fields based on the oldest Imagery Footprint acquisition date.")
-write("All feature UID values have been updated.\n\n")
+write("All feature UID values have been updated.")
+write("Feature level metadata populated for {0}.\n\n".format(fc_fields))
 
 
 ### Trash Pile ###

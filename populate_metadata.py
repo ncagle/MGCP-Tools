@@ -1,6 +1,6 @@
 # ========================= #
-# Populate MGCP Metadata v6 #
-# Nat Cagle 2022-02-15      #
+# Populate MGCP Metadata v7 #
+# Nat Cagle 2022-03-11      #
 # ========================= #
 import decimal
 import arcpy
@@ -10,6 +10,7 @@ from datetime import datetime
 from arcpy import AddMessage as write
 import re
 import uuid
+import traceback
 
 #            _______________________________
 #           | Populates the Metadata fields |
@@ -23,14 +24,16 @@ import uuid
 #~~~\___)~~~
 
 
+
 ''''''''' Dictionary Definitions '''''''''
 
 # If changes are made to the default values for metadata, update them here
+# They failed to mention in the documentation that 1x1 needed to have the degree symbols
+# Also, <W>, <E>, <S>, <N> need to be populated with values
 cell_default = {
 'CCMNT' : 'This cell is UNCLASSIFIED but not approved for public release. Data and derived products may be used for government purposes. NGA name and seal protected by 10 U.S.C. 425.',
 'CCRSID' : 'WGS 84 2D-Geographic East-North',
 'CDCHAR' : 'utf8',
-'CDESCR' : 'Multinational Geospatial Co-production Program (MGCP) dataset covering the 1x1 degree cell between <W> and <E> longitudes and <S> and <N> latitudes',
 'CDLANG' : 'English',
 'CFFMTN' : 'SHAPEFILE',
 'CFFMTS' : 'ESRI Shapefile Technical Description - An ESRI White Paper',
@@ -50,7 +53,7 @@ cell_default = {
 'CSECCL' : 'unclassified',
 'CSERES' : 'MGCP',
 'CSHNDI' : 'Not for Public Release',
-'CURI' : 'http://www.mgcp.ws'
+'CURI' : 'https://www.mgcp.ws'
 }
 
 subregion_default = {
@@ -85,7 +88,7 @@ subregion_default = {
 'SVSPCN' : 'MGCP Technical Reference Documentation (TRD4v4.5.1)',
 'SVSTMT' : 'geometry conformant to specification',
 'SVVALD' : 'TRUE',
-'SVVERS' : '26'
+'SVVERS' : '27'
 }
 
 new_imagery = {
@@ -98,23 +101,41 @@ new_imagery = {
 old_imagery = {
 'SSRCID' : 'Oldest Very High Resolution Commercial Monoscopic Imagery',
 'SSRCSC' : '5000',
-'SSRCTY' : '110', # Long int for the MD_Source domain. See line 73. 'Very High Resolution Commercial Monoscopic Imagery'
+'SSRCTY' : '110', # Long int for the MD_Source domain. See MGCP TRD Domain Coded Values. 'Very High Resolution Commercial Monoscopic Imagery'
 'SUBRID' : '01'
 }
 
 geonames_d = {
 'SSRCID' : 'GeoNames',
 'SSRCSC' : '50000',
-'SSRCTY' : '25', # Long int for the MD_Source domain. See line 73. 'GeoNames'
+'SSRCTY' : '25', # Long int for the MD_Source domain. See MGCP TRD Domain Coded Values. 'GeoNames'
 'SUBRID' : '01'
 }
 
 dvof_d = {
 'SSRCID' : 'DVOF',
 'SSRCSC' : '50000',
-'SSRCTY' : '21', # Long int for the MD_Source domain. See line 73. 'DVOF'
+'SSRCTY' : '21', # Long int for the MD_Source domain. See MGCP TRD Domain Coded Values. 'DVOF'
 'SUBRID' : '01'
 }
+
+aafif_d = {
+'SSRCID' : 'AAFIF',
+'SSRCSC' : '50000',
+'SSRCTY' : '2', # Long int for the MD_Source domain. See MGCP TRD Domain Coded Values. 'AAFIF'
+'SUBRID' : '01'
+}
+
+
+
+# Write information for given variable
+def write_info(name,var): # write_info('var_name',var)
+	write("~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~")
+	write("Debug info for {0}:".format(name))
+	write("   Variable Type: {0}".format(type(var)))
+	write("   Assigned Value: {0}".format(var))
+	write("~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~")
+
 
 
 ''''''''' User Parameters '''''''''
@@ -132,14 +153,20 @@ TPC = arcpy.GetParameterAsText(3)
 # Checkbox "Leave attribute field blank for Edition 1. Populate with 'Complete Update' for Edition 2, 3, etc."
 update_edition = arcpy.GetParameter(4)
 # Dates
-local_date = arcpy.GetParameterAsText(5) # Date TPC was pulled local for finishing YYYY-MM-DD (for latest extraction date) (apply to DVOF source per Candi)
+local_date = arcpy.GetParameterAsText(5) # Date TPC was pulled local for finishing YYYY-MM-DD (for latest extraction date)
 gait_date = arcpy.GetParameterAsText(6) # Delivery date (for date of final GAIT run)
+# AAFIF
+aafif_check = arcpy.GetParameter(7) # There is absolutely too much miscellaneous nonsense with this junk. Just find the date yourself and input it.
+aafif_date = arcpy.GetParameterAsText(8) # YYYY-MM-DD
 # DVOF
-dvof_check = arcpy.GetParameter(7) # Did you use DVOF checkbox
+dvof_check = arcpy.GetParameter(9) # Did you use DVOF checkbox
+dvof_shp_check = arcpy.GetParameter(10) # Why can nothing ever be consistent. This is for if you only have a DVOF source shapefile (point only)
+dvof_file = arcpy.GetParameterAsText(11)
 # Geonames date: Database most recent update on: https://geonames.nga.mil/gns/html
-geo_check = arcpy.GetParameter(8) # Did you use geonames checkbox
-shp_check = arcpy.GetParameter(9) # Do you only have access to a Geonames shapefile in stead of a FC for some incredibly inconvenient reason?
-geo_file = arcpy.GetParameterAsText(10)
+geo_check = arcpy.GetParameter(12) # Did you use geonames checkbox
+geo_shp_check = arcpy.GetParameter(13) # Do you only have access to a Geonames shapefile in stead of a FC for some incredibly inconvenient reason?
+geo_file = arcpy.GetParameterAsText(14)
+
 
 
 ''''''''' Feature Class List '''''''''
@@ -155,22 +182,27 @@ export_path = os.path.dirname(os.path.dirname(MGCP))
 cell_path = os.path.join(MGCP, fc_cell)
 
 
+
 ''''''''' User Error Handling '''''''''
 
 if len(featureclass) != 3:
     write("There should be 3 feature classes in the MGCP_Metadata dataset: Cell, Subregion, and Source.\nPlease repair the dataset and try again.")
     sys.exit(0)
 elif len(featureclass) == 3:
-    write("Populating metadata feature classes " + str(fc_cell) + ", " + str(fc_subregion) + ", and " + str(fc_source) + " with default values.\nIf you wish to update the default values, edit the default dictionaries in the script.")
+    write("\nPopulating metadata feature classes " + str(fc_cell) + ", " + str(fc_subregion) + ", and " + str(fc_source) + " with default values.\nIf you wish to update the default values, edit the default dictionaries in the script.\n")
 # Checks for proper format of user input dates
 try:
+	write("Validating input date fields...")
 	temp1 = datetime.strptime(local_date, '%Y-%m-%d')
 	temp2 = datetime.strptime(gait_date, '%Y-%m-%d')
+	if aafif_check:
+		temp3 = datetime.strptime(aafif_date, '%Y-%m-%d')
 except ValueError:
         raise ValueError("Incorrect date format, should be YYYY-MM-DD")
 
 
-''''''''' Dates '''''''''
+
+''''''''' Dates ''''''''' # SANITIZE ALL THEIR STUPID INCONSISTENT INPUTS
 ex_year = datetime.strptime(gait_date, '%Y-%m-%d')
 curr_year = ex_year.strftime("%Y")
 write('Year of data production: {0}'.format(curr_year))
@@ -183,46 +215,107 @@ with arcpy.da.SearchCursor(img_foot, 'Acquisitio') as img:
 # Get newest and oldest imagery footprint dates
 img_date_new = max(img_dates)
 img_date_old = min(img_dates)
+write("\nNewest acquisition date from imagery footprint: {0}".format(img_date_new))
+write("Oldest acquisition date from imagery footprint: {0}".format(img_date_old))
+
+if dvof_check:
+	dvof_dates = []
+	# Searches through the DVOF file modify dates and creates a list in the YYYY-MM-DD format
+	dvof_field = 'REVISIONDT'
+	with arcpy.da.SearchCursor(dvof_file, dvof_field) as dvof:
+		if dvof_shp_check:
+			write('\nSearching DVOF shapefile for \'REVISIONDT\' field.')
+			for row in dvof: # The DVOF shapefile 'REVISIONDT' field is an unformatted disgrace. ex: 20220310 (I'm just assuming it's YYYY-MM-DD)
+				date_field = str(row[0])
+				feat_date = datetime.strptime(date_field, "%Y%m%d")
+				date = feat_date.strftime("%Y-%m-%d")
+				dvof_dates.append(date)
+		else:
+			write('\nSearching DVOF feature class for \'REVISIONDT\' field.')
+			for row in dvof: # The DVOF feature class 'REVISIONDT' field is an unformatted disgrace. ex: 20220310 (I'm just assuming it's YYYY-MM-DD)
+				date_field = str(row[0])
+				feat_date = datetime.strptime(date_field, "%Y%m%d")
+				date = feat_date.strftime("%Y-%m-%d")
+				dvof_dates.append(date)
+	# Find newest DVOF modify dates
+	dvof_date_new = max(dvof_dates)
+	write("Latest DVOF source revision date: {0}".format(dvof_date_new))
 
 if geo_check:
+	write("\nImporting Geonames Source data...")
 	geo_dates = []
 	# Searches through the Geonames file modify dates and creates a list in the YYYY-MM-DD format
 	geo_field = 'MODIFY_DATE'
-	if shp_check:
-		geo_field = 'MODIFY_DAT'
-	with arcpy.da.SearchCursor(geo_file, geo_field) as geo:
-		if shp_check:
-			write('Searching Geonames shapefile for \'MODIFY_DAT\' field.')
-			for row in geo: # The Geonames shapefile 'MODIFY_DAT' field is already a datetime object and cannot be parsed, only formatted.
-				date = row[0].strftime("%Y-%m-%d")
-				geo_dates.append(date)
-		else:
-			write('Searching Geonames feature class for \'MODIFY_DATE\' field.')
-			for row in geo: # The Geonames FC 'MODIFY_DATE' field needs to be parsed as a datetime object and then formatted
-				feat_date = datetime.strptime(row[0], "%m/%d/%Y")
+	geo_field_names = [f.name for f in arcpy.ListFields(geo_file)]
+	# try:
+	if 'MODIFY_DATE' in geo_field_names:
+		with arcpy.da.SearchCursor(geo_file, geo_field) as geo:
+			write('\nSearching Geonames feature class for \'MODIFY_DATE\' field.')
+			for row in geo:
+				#field_val = row[0]
+				#write_info("field_val row[0]", field_val)
+				date_field = str(row[0])
+				feat_date = datetime.strptime(date_field, "%m/%d/%Y")
 				date = feat_date.strftime("%Y-%m-%d")
 				geo_dates.append(date)
+	elif 'MODIFY_DAT' in geo_field_names:
+		if not geo_shp_check:
+			write("**********************************************************")
+			write("There was an issue with the Geonames Source feature class. Attempting to correct for broken field names...\n")
+			write("It seems someone tried to just load a Geonames shapefile into a GDB instead of properly downloading the data from the NGA GEOnet Name Service and constructing the database. :]\nThe ESRI Geonames Locator tool can be found here: https://solutions.arcgis.com/defense/help/geonames-locator/\nProper data preparation can save a significant amount of time on projects.\nInconsistency in database standards is the leading cause of early heart failure in developers.\nExcel is not a database, and a shapefile is not a feature class. Do better.")
+			write("**********************************************************")
+		geo_field = 'MODIFY_DAT'
+		with arcpy.da.SearchCursor(geo_file, geo_field) as geo:
+				write('\nSearching Geonames shapefile for \'MODIFY_DAT\' field.')
+				write("")
+				for row in geo:
+					date_field = row[0]
+					if type(date_field) == datetime:
+						date = date_field.strftime("%Y-%m-%d")
+						geo_dates.append(date)
+						continue
+					else:
+						feat_date = datetime.strptime(date_field, "%m/%d/%Y")
+						date = feat_date.strftime("%Y-%m-%d")
+						geo_dates.append(date)
+	# except:
+	# 	write("There is an issue with the field name formatting of the Geonames Source.\nPlease make sure it has been properly downloaded from the NGA GEOnet Name Service. A file geodatabase is the best option. :)\nThe ESRI Geonames Locator tool can be found here: https://solutions.arcgis.com/defense/help/geonames-locator/\nProper data preparation can save a significant amount of time on projects.")
+	# 	sys.exit(0)
 	# Find newest Geonames modify dates
 	geo_date_new = max(geo_dates)
+	write("Latest NGA GEOnet Names Server (GNS) database update date in Geonames source: {0}".format(geo_date_new))
+
 
 
 ''''''''' New Cell Generation '''''''''
 
+# Creates list of letters and numbers from TPC variable. ex: E018S07 -> ['E', '018', 'S', '07']
+start = re.findall('(\d+|[A-Za-z]+)', TPC)
+# Error handling for user input
+if len(start) != 4:
+	write("Incorrect format for TPC coordinates. Please ignore negative coordinates. Example: E018S07")
+	sys.exit(0)
+# Edits values for correct coordinate grid quadrant
+# Sanitizes inputs for capital or lowercase
+if start[0] == 'W' or start[0] == 'w':
+    start[1] = abs(int(start[1])) * -1
+    w_long = start[1]
+    e_long = start[1] + 1
+else:
+    start[1] = abs(int(start[1]))
+    w_long = start[1]
+    e_long = start[1] + 1
+if start[2] == 'S' or start[2] == 's':
+    start[3] = abs(int(start[3])) * -1
+    s_lat = start[3]
+    n_lat = start[3] + 1
+else:
+    start[3] = abs(int(start[3]))
+    s_lat = start[3]
+    n_lat = start[3] + 1
+
 # Generates a new cell polygon if box is checked
 if new_cell == True:
-	# Creates list of letters and numbers from TPC variable. ex: E018S07 -> [E, 018, S, 07]
-	start = re.findall('(\d+|[A-Za-z]+)', TPC)
-	# Error handling for user input
-	if len(start) != 4:
-	    write("Incorrect format for TPC coordinates. Please ignore negative coordinates. Example: E018S07")
-	    sys.exit(0)
-
-	# Edits values for correct coordinate grid quadrant
-	if start[0] == 'W' or start[0] == 'w': # Sanitizes inputs for capital or lowercase
-		start[1] = abs(int(start[1])) * -1
-	if start[2] == 'S' or start[2] == 's':
-		start[3] = abs(int(start[3])) * -1
-
 	if len(str(int(start[1]))) == 1:
 		spacing = 1
 	if len(str(int(start[1]))) == 2:
@@ -231,13 +324,13 @@ if new_cell == True:
 		spacing = 3
 
 	# Creates [x,y] point variables
-	start[1] = str(start[1]) + '.000000000000'
-	start[3] = str(start[3]) + '.000000000000'
+	start_one = str(start[1]) + '.000000000000'
+	start_three = str(start[3]) + '.000000000000'
 
-	ws = [float(start[1]), float(start[3])]
-	write('Parsing user input for Southwest corner.')
+	ws = [float(start_one), float(start_three)]
+	write('\n\nParsing user input for Southwest corner.')
 	write(TPC + ' ---> ' + str(ws))
-	if ws[0] == float(start[1]):
+	if ws[0] == float(start_one):
 		write('Coordinates for Cell generation acquired.')
 	else:
 		write('TPC name format invalid. Please try again.')
@@ -287,16 +380,19 @@ if new_cell == True:
 				        write("Interior Ring:")
 
 
+
 ''''''''' Dictionary Updates '''''''''
 
 # Dynamic dictionary values updated per run with user values
+write("\nUpdating metadata dictionaries based on inputs and sources...")
 cell_default['CCDATE'] = local_date
 cell_default['CEDDAT'] = local_date
 cell_default['CMDATE'] = local_date
 cell_default['CNEWSD'] = img_date_new
 cell_default['COLDSD'] = img_date_old
 cell_default['CELLID'] = TPC
-cell_default['CCPYRT'] = 'Copyright {0} by the National Geospatial-Intelligence Agency, U.S. Government. No domestic copyright claimed under Title 17 U.S.C. All rights reserved.'.format(curr_year)
+cell_default['CCPYRT'] = u"Copyright {0} by the National Geospatial-Intelligence Agency, U.S. Government. No domestic copyright claimed under Title 17 U.S.C. All rights reserved.".format(curr_year)
+cell_default['CDESCR'] = u"Multinational Geospatial Co-production Program (MGCP) dataset covering the 1°x1° degree cell between {0} and {1} longitudes and {2} and {3} latitudes.".format(w_long, e_long, s_lat, n_lat) # 18 and 19 longitudes and -8 and -7 latitudes
 subregion_default['SCDATE'] = local_date
 subregion_default['SEDDAT'] = local_date
 subregion_default['SMDATE'] = local_date
@@ -308,15 +404,34 @@ if not update_edition:
 	subregion_default['STYPEU'] = 'Complete Update'
 new_imagery['SSRCDT'] = img_date_new
 old_imagery['SSRCDT'] = img_date_old
-# If geonames or DVOF were used in data collection
-if geo_check:
-	geonames_d['SSRCDT'] = geo_date_new
-	subregion_default['SLSTAT'] = 'Initial collection using imagery and Geonames.'
+# If geonames, DVOF, or AAFIF were used in data collection
+if aafif_check:
+	write("AAFIF Source used. Applying dates and Subregion cell updates.")
+	aafif_d['SSRCDT'] = aafif_date
 if dvof_check:
-	dvof_d['SSRCDT'] = gait_date
-	subregion_default['SLSTAT'] = 'Initial collection using imagery and DVOF.'
-if geo_check and dvof_check:
-	subregion_default['SLSTAT'] = 'Initial collection using imagery, DVOF, and Geonames.'
+	write("DVOF Source used. Applying dates and Subregion cell updates.")
+	dvof_d['SSRCDT'] = dvof_date_new
+if geo_check:
+	write("Geonames Source used. Applying dates and Subregion cell updates.")
+	geonames_d['SSRCDT'] = geo_date_new
+
+if aafif_check or dvof_check or geo_check:
+	str_aafif = ' AAFIF'
+	str_dvof = ' DVOF'
+	str_geo = ' Geonames'
+	comma = ','
+	str_and = ' and'
+
+	# XTHOR = ((1-a)*(1-b)*(c))+((1-a)*(b)*(1-c))+((a)*(1-b)*(1-c))
+	XTHOR = ((1-aafif_check)*(1-dvof_check)*(geo_check))+((1-aafif_check)*(dvof_check)*(1-geo_check))+((aafif_check)*(1-dvof_check)*(1-geo_check))
+	# DXTHOR = ((1-a)*(b)*(c))+((a)*(1-b)*(c))+((a)*(b)*(1-c))
+	DXTHOR = ((1-aafif_check)*(dvof_check)*(geo_check))+((aafif_check)*(1-dvof_check)*(geo_check))+((aafif_check)*(dvof_check)*(1-geo_check))
+	# THRAND = (a*b*c)
+	THRAND = (aafif_check*dvof_check*geo_check)
+
+	ze_formula = ((DXTHOR+THRAND)*comma) + (XTHOR*str_and) + (aafif_check*str_aafif) + (((aafif_check*DXTHOR)+THRAND)*comma) + ((aafif_check*DXTHOR)*str_and) + (dvof_check*str_dvof) + ((dvof_check*geo_check)*comma) + ((dvof_check*geo_check)*str_and) + (geo_check*str_geo)
+
+	subregion_default['SLSTAT'] = "Initial collection using imagery{0}.".format(ze_formula)
 
 
 
@@ -346,6 +461,8 @@ if new_cell == False:
 # to the fields while also creating the cell shape. There for the generated cell acts as a temporary Polygon
 # This inserts a new feature with the correct field values
 with arcpy.da.InsertCursor(fc_cell, cell_fields) as icursor:
+	write("\nPopulating Metadata Cell feature class geometry and attributes.")
+	# Creates a list of all the values in the dictionary based on their associated field keys from the list of dictionary keys
 	values = [cell_default[x] for x in cell_fields]
 	icursor.insertRow(values)
 # Next it applies the @SHAPE token from the temporary polygon
@@ -376,6 +493,7 @@ with arcpy.da.UpdateCursor(fc_cell, 'OID@') as ucursor:
 sub_fields = subregion_default.keys()
 # Inserts a new feature with the values in the dictionary for the field keys
 with arcpy.da.InsertCursor(fc_subregion, sub_fields) as icursor:
+	write("Populating Metadata Subregion feature class geometry and attributes.")
 	# Creates a list of all the values in the dictionary based on their associated field keys from the list of dictionary keys
 	values = [subregion_default[x] for x in sub_fields]
 	icursor.insertRow(values)
@@ -394,23 +512,31 @@ with arcpy.da.UpdateCursor(fc_subregion, ['SHAPE@', 'gfid']) as ucursor:
 src_fields = new_imagery.keys()
 # Inserts new features for all specified sources with the values in the dictionary for the field keys
 with arcpy.da.InsertCursor(fc_source, src_fields) as icursor:
+	write("Populating Metadata Source feature class geometry and attributes.\n")
 	# Creates lists of all the values in the dictionaries based on their associated field keys from the list of dictionary keys (the source feature class has the same keys regardless of source type)
 	img_new_vals = [new_imagery[x] for x in src_fields]
 	img_old_vals = [old_imagery[x] for x in src_fields]
 	# Only generates features if they are specified as sources from user input
-	if geo_check == True:
-		geo_vals = [geonames_d[x] for x in src_fields]
-	if dvof_check == True:
+	if aafif_check:
+		aafif_vals = [aafif_d[x] for x in src_fields]
+	if dvof_check:
 		dvof_vals = [dvof_d[x] for x in src_fields]
+	if geo_check:
+		geo_vals = [geonames_d[x] for x in src_fields]
 	# Inserts the features based on the source values defined above
 	icursor.insertRow(img_new_vals)
 	icursor.insertRow(img_old_vals)
 	# Only generates features if they are specified as sources from user input
-	if geo_check == True:
-		icursor.insertRow(geo_vals)
-	if dvof_check == True:
+	if aafif_check:
+		icursor.insertRow(aafif_vals)
+		write("Created AAFIF Source feature")
+	if dvof_check:
 		icursor.insertRow(dvof_vals)
-# Updates the shape of the subregion polygon with the shape of the previous cell polygon
+		write("Created DVOF Source feature")
+	if geo_check:
+		icursor.insertRow(geo_vals)
+		write("Created Geonames Source feature")
+# Updates the shapes of the source polygons with the shape of the previous cell polygon
 with arcpy.da.UpdateCursor(fc_source, ['SHAPE@', 'gfid']) as ucursor:
 	for row in ucursor:
 		# Populates the gfid field using the uuid python function
@@ -421,20 +547,81 @@ with arcpy.da.UpdateCursor(fc_source, ['SHAPE@', 'gfid']) as ucursor:
 		ucursor.updateRow(row)
 
 
+
 ''''''''' Export XML Metadata '''''''''
 
 try:
 	# Checks out Defense Mapping extension
 	arcpy.CheckOutExtension("defense")
-	write("Exporting Cell metadata to xml file. Path is located here:")
+	write("\nExporting Cell metadata to xml file. Path is located here:")
 	write(export_path)
 	# Runs Export MGCP XML Metadata tool from Defense Mapping using the cell path and the export path
 	arcpy.ExportMetadata_defense(cell_path, export_path)
 	arcpy.CheckInExtension("defense")
-	write("==== Metadata construction is complete! ====")
+	write("==== Metadata construction is complete! ====\n")
 except:
 	# Error handling. The Metadata dataset has to be in the GDB with a local copy of the data
     write("MGCP dataset must be in the GDB along with the MGCP_Metadata dataset.")
+
+
+
+
+
+# THNOR = (1-a)*(1-b)*(1-c) (No source option checked)
+#     # 0 0 0 = 1
+#     # 1 0 0 = 0
+#     # 0 1 0 = 0
+#     # 0 0 1 = 0
+#     # 1 1 0 = 0
+#     # 0 1 1 = 0
+#     # 1 0 1 = 0
+#     # 1 1 1 = 0
+# XTHOR = ((1-a)*(1-b)*(c))+((1-a)*(b)*(1-c))+((a)*(1-b)*(1-c)) (Only 1 source option checked) # Originally (1-(a+b+c-1))+(a*b*c)
+#     # 0 0 0 = 0
+#     # 1 0 0 = 1
+#     # 0 1 0 = 1
+#     # 0 0 1 = 1
+#     # 1 1 0 = 0
+#     # 0 1 1 = 0
+#     # 1 0 1 = 0
+#     # 1 1 1 = 0
+# DXTHOR = ((1-a)*(b)*(c))+((a)*(1-b)*(c))+((a)*(b)*(1-c)) (Only 2 source options checked) # Originally (a+b+c-1)-2(a*b*c)
+#     # 0 0 0 = 0
+#     # 1 0 0 = 0
+#     # 0 1 0 = 0
+#     # 0 0 1 = 0
+#     # 1 1 0 = 1
+#     # 0 1 1 = 1
+#     # 1 0 1 = 1
+#     # 1 1 1 = 0
+# THRAND = (a*b*c) (All 3 source options checked) # Originally (0+a)*(0+b)*(0+c)
+#     # 0 0 0 = 0
+#     # 1 0 0 = 0
+#     # 0 1 0 = 0
+#     # 0 0 1 = 0
+#     # 1 1 0 = 0
+#     # 0 1 1 = 0
+#     # 1 0 1 = 0
+#     # 1 1 1 = 1
+# THNAND = (1-(a*b*c))
+#     # 0 0 0 = 1
+#     # 1 0 0 = 1
+#     # 0 1 0 = 1
+#     # 0 0 1 = 1
+#     # 1 1 0 = 1
+#     # 0 1 1 = 1
+#     # 1 0 1 = 1
+#     # 1 1 1 = 0
+# |a|d|g|
+#  0 0 0  'Initial collection using imagery.'
+#  1 0 0  'Initial collection using imagery and AAFIF.'
+#  0 1 0  'Initial collection using imagery and DVOF.'
+#  0 0 1  'Initial collection using imagery and Geonames.'
+#  1 1 0  'Initial collection using imagery, AAFIF, and DVOF.'
+#  0 1 1  'Initial collection using imagery, DVOF, and Geonames.'
+#  1 0 1  'Initial collection using imagery, AAFIF, and Geonames.'
+#  1 1 1  'Initial collection using imagery, AAFIF, DVOF, and Geonames.'
+
 
 
 ###### Making a skware in ArcMap trash heap ######

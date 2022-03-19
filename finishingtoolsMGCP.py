@@ -1,6 +1,6 @@
 # ====================== #
-# MGCP Finishing Tool v4 #
-# Nat Cagle 2021-09-20   #
+# MGCP Finishing Tool v5 #
+# Nat Cagle 2022-03-11   #
 # ====================== #
 import arcpy
 from arcpy import AddMessage as write
@@ -1202,22 +1202,22 @@ arcpy.CalculateDefaultValues_defense(arcpy.env.workspace)
 
 
 ''''''''' Calculate Metrics '''''''''
-# Calculates the metric values of the specified fields
-tool_name = 'Calculate Metrics'
-metric_type = 'LENGTH;WIDTH;AREA;ANGLE_OF_ORIENTATION'
-for fc in featureclass:
-	try:
-		arcpy.AddMessage("Calculating AOO, ARA, LZN, and WID for " + str(fc))
-		arcpy.CalculateMetrics_defense(fc, metric_type, "LZN", "WID", "ARA", "#", "#", "#")
-	except arcpy.ExecuteError:
-		# if the code failed for the current fc, check the error
-		error_count += 1
-		write("\n***Failed to run {0}.***\n".format(tool_name))
-		write("Error Report:")
-		write("~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~")
-		write(arcpy.GetMessages())
-		write("~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~")
-		sys.exit(0)
+# # Calculates the metric values of the specified fields
+# tool_name = 'Calculate Metrics'
+# metric_type = 'LENGTH;WIDTH;AREA'
+# for fc in featureclass:
+# 	try:
+# 		arcpy.AddMessage("Calculating AOO, ARA, LZN, and WID for " + str(fc))
+# 		arcpy.CalculateMetrics_defense(fc, metric_type, "LZN", "WID", "ARA", "#", "#", "#")
+# 		arcpy.CalculateMetrics_defense
+# 	except arcpy.ExecuteError:
+# 		# if the code failed for the current fc, check the error
+# 		write("\n***Failed to run {0}.***\n".format(tool_name))
+# 		write("Error Report:")
+# 		write("~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~")
+# 		write(arcpy.GetMessages())
+# 		write("~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~")
+# 		sys.exit(0)
 
 
 ''''''''' Integrate and Repair '''''''''
