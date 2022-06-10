@@ -1154,6 +1154,7 @@ sub_cat = { 'AerofacA' : { 0 : 'GB005',
 MGCP = arcpy.GetParameterAsText(0)
 arcpy.env.workspace = MGCP
 arcpy.env.overwriteOutput = True
+arcpy.RefreshCatalog(MGCP)
 featureclass = arcpy.ListFeatureClasses()
 featureclass.sort()
 

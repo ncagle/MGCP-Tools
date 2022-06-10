@@ -1,3 +1,4 @@
+# -*- coding: utf-8 -*-
 # ========================= #
 # Populate MGCP Metadata v7 #
 # Nat Cagle 2022-03-11      #
@@ -275,9 +276,12 @@ if geo_check:
 						geo_dates.append(date)
 						continue
 					else:
-						feat_date = datetime.strptime(date_field, "%m/%d/%Y")
-						date = feat_date.strftime("%Y-%m-%d")
-						geo_dates.append(date)
+						try:
+							feat_date = datetime.strptime(date_field, "%m/%d/%Y")
+							date = feat_date.strftime("%Y-%m-%d")
+							geo_dates.append(date)
+						except:
+							geo_dates.append(date_field)
 	# except:
 	# 	write("There is an issue with the field name formatting of the Geonames Source.\nPlease make sure it has been properly downloaded from the NGA GEOnet Name Service. A file geodatabase is the best option. :)\nThe ESRI Geonames Locator tool can be found here: https://solutions.arcgis.com/defense/help/geonames-locator/\nProper data preparation can save a significant amount of time on projects.")
 	# 	sys.exit(0)
@@ -392,7 +396,11 @@ cell_default['CNEWSD'] = img_date_new
 cell_default['COLDSD'] = img_date_old
 cell_default['CELLID'] = TPC
 cell_default['CCPYRT'] = u"Copyright {0} by the National Geospatial-Intelligence Agency, U.S. Government. No domestic copyright claimed under Title 17 U.S.C. All rights reserved.".format(curr_year)
-cell_default['CDESCR'] = u"Multinational Geospatial Co-production Program (MGCP) dataset covering the 1°x1° degree cell between {0} and {1} longitudes and {2} and {3} latitudes.".format(w_long, e_long, s_lat, n_lat) # 18 and 19 longitudes and -8 and -7 latitudes
+
+degree_sign = u'\N{DEGREE SIGN}'
+cell_default['CDESCR'] = u"Multinational Geospatial Co-production Program (MGCP) dataset covering the 1{4}x1{4} degree cell between {0} and {1} longitudes and {2} and {3} latitudes.".format(w_long, e_long, s_lat, n_lat, degree_sign) # 18 and 19 longitudes and -8 and -7 latitudes # 1°x1° # b"1\xC2\xB0x1\xC2\xB0"
+#cell_default['CDESCR'] = b"Multinational Geospatial Co-production Program (MGCP) dataset covering the 1\xC2\xB0x1\xC2\xB0 degree cell between {0} and {1} longitudes and {2} and {3} latitudes.".format(w_long, e_long, s_lat, n_lat)
+
 subregion_default['SCDATE'] = local_date
 subregion_default['SEDDAT'] = local_date
 subregion_default['SMDATE'] = local_date

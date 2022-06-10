@@ -1,3 +1,4 @@
+# -*- coding: utf-8 -*-
 # ============================ #
 # Populate Feature Metadata v6 #
 # Nat Cagle 2022-03-11         #
@@ -46,6 +47,7 @@ if run_fin_tool == False:
 arcpy.env.workspace = MGCP
 workspace = arcpy.env.workspace
 arcpy.env.overwriteOutput = True
+arcpy.RefreshCatalog(MGCP)
 featureclass = arcpy.ListFeatureClasses()
 featureclass.sort()
 
@@ -84,9 +86,13 @@ if geo_check: # geo_date_new
 						geo_dates.append(date)
 						continue
 					else:
-						feat_date = datetime.strptime(date_field, "%m/%d/%Y")
-						date = feat_date.strftime("%Y-%m-%d")
-						geo_dates.append(date)
+						try:
+							feat_date = datetime.strptime(date_field, "%m/%d/%Y")
+							date = feat_date.strftime("%Y-%m-%d")
+							geo_dates.append(date)
+						except:
+							geo_dates.append(date_field)
+
 	# except:
 	# 	write("There is an issue with the field name formatting of the Geonames Source.\nPlease make sure it has been properly downloaded from the NGA GEOnet Name Service. A file geodatabase is the best option. :)\nThe ESRI Geonames Locator tool can be found here: https://solutions.arcgis.com/defense/help/geonames-locator/\nProper data preparation can save a significant amount of time on projects.")
 	# 	sys.exit(0)
