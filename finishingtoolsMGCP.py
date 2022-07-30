@@ -1,6 +1,6 @@
 # ====================== #
-# MGCP Finishing Tool v5 #
-# Nat Cagle 2022-03-11   #
+# MGCP Finishing Tool v7 #
+# Nat Cagle 2022-07-27   #
 # ====================== #
 import arcpy
 from arcpy import AddMessage as write
@@ -1161,38 +1161,60 @@ featureclass.sort()
 ''''''''' Repair Topology '''''''''
 
 # Repairs the geometry of all feature classes for any NULL geometries left behind after validating a Topology
-for fc in featureclass:
-	write("Repairing NULL geometries from Topology in " + str(fc))
-	arcpy.RepairGeometry_management(fc, "DELETE_NULL")
+# for fc in featureclass:
+# 	write("Repairing NULL geometries from Topology in " + str(fc))
+# 	arcpy.RepairGeometry_management(fc, "DELETE_NULL")
 
 
 ''''''''' Populate F_Code '''''''''
 
 # Modified John's Fcode tool to work with nest MGCP subtype Dictionary
 for fc in featureclass:
-	try:
-		with arcpy.da.UpdateCursor(fc,["f_code", "fcsubtype"]) as ucursor:
-			for i in ucursor:
-				if i[0] != str(sub_cat[fc][i[1]]):
-					i[0] = str(sub_cat[fc][i[1]])
-					ucursor.updateRow(i)
-		write(str(fc) + " Feature F_Codes updated")
-	except:
-		write(str(fc) + " does not contain F_Codes.")
+	#try:
+	with arcpy.da.UpdateCursor(fc,["f_code", "fcsubtype"]) as ucursor:
+		for i in ucursor:
+			if i[0] != str(sub_cat[fc][i[1]]):
+				i[0] = str(sub_cat[fc][i[1]])
+				ucursor.updateRow(i)
+	write(str(fc) + " Feature F_Codes updated")
+	#except:
+		#write(str(fc) + " does not contain F_Codes.")
+write("\n")
+
+
+''''''''' Simple Explode All Multipart '''''''''
+
+single = "in_memory\\single"
+for fc in featureclass:
+	write("Exploding multipart features in {0}".format(fc))
+	arcpy.MultipartToSinglepart_management(fc, single)
+	arcpy.DeleteFeatures_management(fc)
+	arcpy.Append_management(single, fc, "NO_TEST", "", "")
+	arcpy.Delete_management(single)
+write("\n")
 
 
 ''''''''' Make Feature Layers '''''''''
 
 # Make feature layers for each fc
 write("Making Feature Layers")
+write("PowerP")
 arcpy.MakeFeatureLayer_management("PowerP", "power_p")
+write("SubstatP")
 arcpy.MakeFeatureLayer_management("SubstatP", "substat_p")
+write("UtilP")
 arcpy.MakeFeatureLayer_management("UtilP", "util_p")
+write("PipeL")
 arcpy.MakeFeatureLayer_management("PipeL", "pipe_l")
+write("PowerL")
 arcpy.MakeFeatureLayer_management("PowerL", "power_l")
+write("TeleL")
 arcpy.MakeFeatureLayer_management("TeleL", "tele_l")
+write("PowerA")
 arcpy.MakeFeatureLayer_management("PowerA", "power_a")
+write("SubstatA")
 arcpy.MakeFeatureLayer_management("SubstatA", "substation_a")
+write("\n")
 
 
 ''''''''' Calculate Default Values '''''''''
@@ -1200,6 +1222,7 @@ arcpy.MakeFeatureLayer_management("SubstatA", "substation_a")
 # Calculate Default Values
 write("Calculating Default Values")
 arcpy.CalculateDefaultValues_defense(arcpy.env.workspace)
+write("\n")
 
 
 ''''''''' Calculate Metrics '''''''''
@@ -1226,12 +1249,14 @@ arcpy.CalculateDefaultValues_defense(arcpy.env.workspace)
 # Integrating Utility surfaces and points to curves
 write("Integrating Utilities")
 arcpy.Integrate_management("power_p 2;substat_p 2;util_p 2;pipe_l 1;power_l 1;tele_l 1;power_a 3;substation_a 3", "0.03 Meters")
+write("")
 
 # Post Integration Repair
 write("Repairing Lines")
 arcpy.RepairGeometry_management("pipe_l", "DELETE_NULL")
 arcpy.RepairGeometry_management("power_l", "DELETE_NULL")
 arcpy.RepairGeometry_management("tele_l", "DELETE_NULL")
+write("\n")
 
 
 ''''''''' Repair for Good Measure '''''''''

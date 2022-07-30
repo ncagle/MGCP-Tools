@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 # ========================= #
-# Populate MGCP Metadata v7 #
-# Nat Cagle 2022-03-11      #
+# Populate MGCP Metadata v9 #
+# Nat Cagle 2022-07-26      #
 # ========================= #
 import decimal
 import arcpy
@@ -246,25 +246,38 @@ if geo_check:
 	write("\nImporting Geonames Source data...")
 	geo_dates = []
 	# Searches through the Geonames file modify dates and creates a list in the YYYY-MM-DD format
-	geo_field = 'MODIFY_DATE'
 	geo_field_names = [f.name for f in arcpy.ListFields(geo_file)]
-	# try:
-	if 'MODIFY_DATE' in geo_field_names:
+
+	if 'mod_dt_nm' in geo_field_names:
+		geo_field = 'mod_dt_nm'
+		with arcpy.da.SearchCursor(geo_file, geo_field) as scursor:
+			write("\nSearching Geonames feature class for date field.\nName: 'mod_dt_nm'\nAlias: 'Last Edited Date (name)'")
+			for srow in scursor:
+				date_field = srow[0]
+				if type(date_field) == datetime:
+					date = date_field.strftime("%Y-%m-%d")
+					geo_dates.append(date)
+				else:
+					feat_date = datetime.strptime(date_field, "%m/%d/%Y")
+					date = feat_date.strftime("%Y-%m-%d")
+					geo_dates.append(date)
+
+	elif 'MODIFY_DATE' in geo_field_names:
+		geo_field = 'MODIFY_DATE'
 		with arcpy.da.SearchCursor(geo_file, geo_field) as geo:
 			write('\nSearching Geonames feature class for \'MODIFY_DATE\' field.')
 			for row in geo:
-				#field_val = row[0]
-				#write_info("field_val row[0]", field_val)
 				date_field = str(row[0])
 				feat_date = datetime.strptime(date_field, "%m/%d/%Y")
 				date = feat_date.strftime("%Y-%m-%d")
 				geo_dates.append(date)
+
 	elif 'MODIFY_DAT' in geo_field_names:
 		if not geo_shp_check:
-			write("**********************************************************")
-			write("There was an issue with the Geonames Source feature class. Attempting to correct for broken field names...\n")
-			write("It seems someone tried to just load a Geonames shapefile into a GDB instead of properly downloading the data from the NGA GEOnet Name Service and constructing the database. :]\nThe ESRI Geonames Locator tool can be found here: https://solutions.arcgis.com/defense/help/geonames-locator/\nProper data preparation can save a significant amount of time on projects.\nInconsistency in database standards is the leading cause of early heart failure in developers.\nExcel is not a database, and a shapefile is not a feature class. Do better.")
-			write("**********************************************************")
+			arcpy.AddError("**********************************************************")
+			arcpy.AddError("There was an issue with the Geonames Source feature class. Attempting to correct for broken field names...\n")
+			arcpy.AddError("It seems someone tried to just load a Geonames shapefile into a GDB instead of properly downloading the data from the NGA GEOnet Name Service. :]\nInconsistency in database standards is the leading cause of early heart failure in developers.\nExcel is not a database, and a shapefile is not a feature class. Do better.")
+			arcpy.AddError("**********************************************************")
 		geo_field = 'MODIFY_DAT'
 		with arcpy.da.SearchCursor(geo_file, geo_field) as geo:
 				write('\nSearching Geonames shapefile for \'MODIFY_DAT\' field.')
@@ -282,10 +295,7 @@ if geo_check:
 							geo_dates.append(date)
 						except:
 							geo_dates.append(date_field)
-	# except:
-	# 	write("There is an issue with the field name formatting of the Geonames Source.\nPlease make sure it has been properly downloaded from the NGA GEOnet Name Service. A file geodatabase is the best option. :)\nThe ESRI Geonames Locator tool can be found here: https://solutions.arcgis.com/defense/help/geonames-locator/\nProper data preparation can save a significant amount of time on projects.")
-	# 	sys.exit(0)
-	# Find newest Geonames modify dates
+
 	geo_date_new = max(geo_dates)
 	write("Latest NGA GEOnet Names Server (GNS) database update date in Geonames source: {0}".format(geo_date_new))
 
@@ -331,44 +341,57 @@ if new_cell == True:
 	start_one = str(start[1]) + '.000000000000'
 	start_three = str(start[3]) + '.000000000000'
 
-	ws = [float(start_one), float(start_three)]
+	corner = [float(start_one), float(start_three)]
 	write('\n\nParsing user input for Southwest corner.')
-	write(TPC + ' ---> ' + str(ws))
-	if ws[0] == float(start_one):
+	write(TPC + ' ---> ' + str(corner))
+	if corner[0] == float(start_one):
 		write('Coordinates for Cell generation acquired.')
 	else:
 		write('TPC name format invalid. Please try again.')
 		pause()
-	wn = [ws[0], ws[1]+1]
-	en = [ws[0]+1, ws[1]+1]
-	es = [ws[0]+1, ws[1]]
+	# wn = [ws[0], ws[1]+1]
+	# en = [ws[0]+1, ws[1]+1]
+	# es = [ws[0]+1, ws[1]]
+	# coords = [ws, wn, en, es, ws]
+	# corner = [19.000000000000, -8.000000000000]
+	ws = arcpy.Point(corner[0], corner[1])
+	wn = arcpy.Point(corner[0], corner[1]+1)
+	en = arcpy.Point(corner[0]+1, corner[1]+1)
+	es = arcpy.Point(corner[0]+1, corner[1])
 	coords = [ws, wn, en, es, ws]
 	write('Constructing new cell polygons based on provided coordinates:\n')
 
-	write(str(wn) + '_____' + str(en))
+	write(str([corner[0], corner[1]+1]) + '_____' + str([corner[0]+1, corner[1]+1]))
 	if spacing == 1:
 		write('    |              | \n    |              | \n    |              | \n    |              | \n    |              | \n    |              | ')
 	if spacing == 2:
 		write('     |               | \n     |               | \n     |               | \n     |               | \n     |               | \n     |               | ')
 	if spacing == 3:
 		write('      |                | \n      |                | \n      |                | \n      |                | \n      |                | \n      |                | ')
-	write(str(ws) + '_____' + str(es))
-
+	write(str(corner) + '_____' + str([corner[0]+1, corner[1]]))
 
 	# Create a feature class with a spatial reference of GCS WGS 1984
-	result = arcpy.management.CreateFeatureclass(MGCP, "bs_line_skware", "POLYLINE", spatial_reference=4326)
-	feature_class = result[0]
+	arcpy.CreateFeatureclass_management(MGCP, "bs_skware", "POLYGON", spatial_reference=4326)
 
-	# Write feature to new feature class
-	with arcpy.da.InsertCursor(feature_class, ['SHAPE@']) as icursor:
-	    icursor.insertRow([coords])
+	with arcpy.da.InsertCursor("bs_skware", ["SHAPE@"]) as icursor:
+		icursor.insertRow([arcpy.Polygon(arcpy.Array(coords), arcpy.SpatialReference(4326))])
 
-	# Use the FeatureToPolygon function to form new areas
-	arcpy.FeatureToPolygon_management('bs_line_skware', 'bs_skware')
 	arcpy.Append_management('bs_skware', fc_cell, 'NO_TEST','First','')
-	arcpy.Delete_management('bs_line_skware')
 	arcpy.Delete_management('bs_skware')
 
+	# Create a feature class with a spatial reference of GCS WGS 1984
+	#result = arcpy.management.CreateFeatureclass(MGCP, "bs_line_skware", "POLYLINE", spatial_reference=4326)
+	#feature_class = result[0]
+
+	# Write feature to new feature class
+	#with arcpy.da.InsertCursor(feature_class, ['SHAPE@']) as icursor:
+	#    icursor.insertRow([coords])
+
+	# Use the FeatureToPolygon function to form new areas
+	#arcpy.FeatureToPolygon_management('bs_line_skware', 'bs_skware')
+	#arcpy.Append_management('bs_skware', fc_cell, 'NO_TEST','First','')
+	#arcpy.Delete_management('bs_line_skware')
+	#arcpy.Delete_management('bs_skware')
 
 	write('\nConfirmation of Cell vertices at 1 degree intervals:')
 	with arcpy.da.SearchCursor(fc_cell, ["SHAPE@"]) as ucursor:
