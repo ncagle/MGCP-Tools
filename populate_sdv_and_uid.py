@@ -1,8 +1,8 @@
 # -*- coding: utf-8 -*-
-# ============================ #
-# Populate Feature Metadata v8 #
-# Nat Cagle 2022-07-21         #
-# ============================ #
+# =======================+===== #
+# Populate Feature Metadata v10 #
+#      Nat Cagle 2022-08-16     #
+# ========================+==== #
 import arcpy as ap
 from arcpy import AddMessage as write
 from datetime import datetime as dt
@@ -55,41 +55,50 @@ def debug_view(**kwargs): # Input variable to view info in script output
 #-----------------------------------
 def update_uid():
 	uid_total = 0
+	ap.AddWarning("\nThe Global Feature Identifier field that ESRI is 100% certain always \"provides sufficient combinations within a database and cannot be duplicated\" has, in fact, made quite a few duplicates.\nSince the field is a special type (and can't be duplicated), we aren't allowed to edit the values. But by some miracle, it keeps making the \"impossible\" duplicates...\n")
 	for fc in featureclass:
 		if not get_count(fc):
 			continue
-		write("Searching {0} UIDs in {1} for bad or missing values.".format(get_count(fc), fc))
+		write("\nSearching {0} UIDs in {1} for bad or missing values.".format(get_count(fc), fc))
 		uid_count = 0
-		with ap.da.SearchCursor(fc, 'uid') as scursor:
-			values = [srow[0] for srow in scursor]
-		with ap.da.UpdateCursor(fc, 'uid') as ucursor:
+		with ap.da.SearchCursor(fc, ['uid']) as scursor:
+			uid_values = [srow[0] for srow in scursor]
+		with ap.da.UpdateCursor(fc, ['uid']) as ucursor:
 			for urow in ucursor:
 				if not populated(urow[0]):
 					urow[0] = str(uuid.uuid4())
 					uid_count += 1
-				elif len(urow[0]) != 36: # 36 character random alphanumeric string
+				if len(urow[0]) != 36: # 36 character random alphanumeric string
 					urow[0] = str(uuid.uuid4()) # GOTOHELL-FUCK-COCK-PISS-MOTHERFUCKER and LEONARDO-EATS-FROG-EGGS-DISGUSTINGLY are valid XD
 					uid_count += 1
-				elif values.count(urow[0]) > 1:
+				if uid_values.count(urow[0]) > 1:
 					urow[0] = str(uuid.uuid4())
 					uid_count += 1
 				ucursor.updateRow(urow)
 			if uid_count:
 				write("Updated {0} MGCP UIDs in {1}".format(uid_count, fc))
 			uid_total += uid_count
-	ap.AddWarning("{0} invalid or missing UID values updated.".format(uid_total))
+
+		gfid_field = 'gfid'
+		gfid_uid_expression = '!uid!'
+		write("Brute forcing the unduplicable GFID field in {0} to no longer contain duplicates...".format(fc))
+		ap.CalculateField_management(fc, gfid_field, gfid_uid_expression, "PYTHON_9.3")
+		write("Finished manually updating all the already perfect GFID values in {0}\n".format(fc))
+
+	ap.AddWarning("{0} invalid or missing UID or GFID values updated.".format(uid_total))
 	return uid_total
 
 
 ''''''''' Parameters and Variables '''''''''
 MGCP = ap.GetParameterAsText(0) # Get MGCP dataset
 img_foot = ap.GetParameterAsText(1) # Get imagery footprint shapefile
-run_fin_tool = ap.GetParameter(2) # Check you ran the MGCP Finishing Tool first.
+curr_year = ap.GetParameterAsText(2)
+run_fin_tool = ap.GetParameter(3) # Check you ran the MGCP Finishing Tool first.
 #actual_sdv = ap.GetParameter(3) # Option to still use the hard work I put into indentifying and updating spatially accurate feature source dates
-sdv_check = ap.GetParameter(3) # Update SDV from Imagery Footprint
+sdv_check = ap.GetParameter(4) # Update SDV from Imagery Footprint
 # Geonames date: Database most recent update on: https://geonames.nga.mil/gns/html
-geo_shp_check = ap.GetParameter(4) # Do you only have access to a Geonames shapefile in stead of a FC for some incredibly inconvenient reason?
-geo_file = ap.GetParameterAsText(5)
+geo_shp_check = ap.GetParameter(5) # Do you only have access to a Geonames shapefile in stead of a FC for some incredibly inconvenient reason?
+geo_file = ap.GetParameterAsText(6)
 
 if run_fin_tool == False:
 	write("\n\n\n**********************************************************")
@@ -275,7 +284,7 @@ uid_total = update_uid()
 
 ''''''''' Populate Feature Metadata '''''''''
 acc = 1 # If not already
-ccn = r"Copyright 2014 by the National Geospatial-Intelligence Agency, U.S. Government.  No domestic copyright claimed under Title 17 U.S.C. All rights reserved."
+ccn = r"Copyright {0} by the National Geospatial-Intelligence Agency, U.S. Government. No domestic copyright claimed under Title 17 U.S.C. All rights reserved.".format(curr_year)
 sdp = "Very High Resolution Commercial Monoscopic Imagery"
 srt = 110
 txt = 'N_A' # Unless populated

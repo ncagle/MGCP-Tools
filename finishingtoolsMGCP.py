@@ -1,8 +1,8 @@
 # ====================== #
-# MGCP Finishing Tool v7 #
-# Nat Cagle 2022-07-27   #
+# MGCP Finishing Tool v8 #
+# Nat Cagle 2022-08-10   #
 # ====================== #
-import arcpy
+import arcpy as ap
 from arcpy import AddMessage as write
 
 #            ____________________________
@@ -1150,20 +1150,61 @@ sub_cat = { 'AerofacA' : { 0 : 'GB005',
 }
 
 
+
+'''
+╔═══════════════════╗
+║ General Functions ║
+╚═══════════════════╝
+'''
+#-----------------------------------
+def get_count(fc): # Returns feature count
+    results = int(ap.GetCount_management(fc).getOutput(0))
+    return results
+
+#-----------------------------------
+def MGCP_check(MGCP):
+	if not ap.Exists(MGCP):
+		ap.AddError('                       ______\n                    .-"      "-.\n                   /            \\\n       _          |              |          _\n      ( \\         |,  .-.  .-.  ,|         / )\n       > "=._     | )(__/  \\__)( |     _.=" <\n      (_/"=._"=._ |/     /\\     \\| _.="_.="\\_)\n             "=._ (_     ^^     _)"_.="\n                 "=\\__|IIIIII|__/="\n                _.="| \\IIIIII/ |"=._\n      _     _.="_.="\\          /"=._"=._     _\n     ( \\_.="_.="     `--------`     "=._"=._/ )\n      > _.="                            "=._ <\n     (_/                                    \\_)\n')
+		ap.AddError("Dataset {0} does not exist.\nPlease double check that the file path is correct.\nExitting tool...\n".format(MGCP))
+		sys.exit(0)
+
+#-----------------------------------
+def check_defense(in_out): # If any of the tools that require the Defense Mapping license are selected, check out the Defense license
+	class LicenseError(Exception):
+		pass
+	try:
+		if ap.CheckExtension('defense') == 'Available' and in_out == 'out':
+			write("\n~~ Checking out Defense Mapping Extension ~~\n")
+			ap.CheckOutExtension('defense')
+		elif in_out == 'in':
+			write("\n~~ Checking Defense Mapping Extension back in ~~\n")
+			ap.CheckInExtension('defense')
+		else:
+			raise LicenseError
+	except LicenseError:
+		write("Defense Mapping license is unavailable")
+	except ap.ExecuteError:
+		writeresults('check_defense')
+
+
+
 # User parameters
-MGCP = arcpy.GetParameterAsText(0)
-arcpy.env.workspace = MGCP
-arcpy.env.overwriteOutput = True
-arcpy.RefreshCatalog(MGCP)
-featureclass = arcpy.ListFeatureClasses()
+MGCP = ap.GetParameterAsText(0)
+MGCP_check(MGCP) # Check that the provided MGCP exists
+ap.env.workspace = MGCP
+ap.env.overwriteOutput = True
+ap.RefreshCatalog(MGCP)
+featureclass = ap.ListFeatureClasses()
 featureclass.sort()
+
+
 
 ''''''''' Repair Topology '''''''''
 
 # Repairs the geometry of all feature classes for any NULL geometries left behind after validating a Topology
 # for fc in featureclass:
 # 	write("Repairing NULL geometries from Topology in " + str(fc))
-# 	arcpy.RepairGeometry_management(fc, "DELETE_NULL")
+# 	ap.RepairGeometry_management(fc, "DELETE_NULL")
 
 
 ''''''''' Populate F_Code '''''''''
@@ -1171,7 +1212,7 @@ featureclass.sort()
 # Modified John's Fcode tool to work with nest MGCP subtype Dictionary
 for fc in featureclass:
 	#try:
-	with arcpy.da.UpdateCursor(fc,["f_code", "fcsubtype"]) as ucursor:
+	with ap.da.UpdateCursor(fc,["f_code", "fcsubtype"]) as ucursor:
 		for i in ucursor:
 			if i[0] != str(sub_cat[fc][i[1]]):
 				i[0] = str(sub_cat[fc][i[1]])
@@ -1187,10 +1228,10 @@ write("\n")
 single = "in_memory\\single"
 for fc in featureclass:
 	write("Exploding multipart features in {0}".format(fc))
-	arcpy.MultipartToSinglepart_management(fc, single)
-	arcpy.DeleteFeatures_management(fc)
-	arcpy.Append_management(single, fc, "NO_TEST", "", "")
-	arcpy.Delete_management(single)
+	ap.MultipartToSinglepart_management(fc, single)
+	ap.DeleteFeatures_management(fc)
+	ap.Append_management(single, fc, "NO_TEST", "", "")
+	ap.Delete_management(single)
 write("\n")
 
 
@@ -1199,30 +1240,31 @@ write("\n")
 # Make feature layers for each fc
 write("Making Feature Layers")
 write("PowerP")
-arcpy.MakeFeatureLayer_management("PowerP", "power_p")
+ap.MakeFeatureLayer_management("PowerP", "power_p")
 write("SubstatP")
-arcpy.MakeFeatureLayer_management("SubstatP", "substat_p")
+ap.MakeFeatureLayer_management("SubstatP", "substat_p")
 write("UtilP")
-arcpy.MakeFeatureLayer_management("UtilP", "util_p")
+ap.MakeFeatureLayer_management("UtilP", "util_p")
 write("PipeL")
-arcpy.MakeFeatureLayer_management("PipeL", "pipe_l")
+ap.MakeFeatureLayer_management("PipeL", "pipe_l")
 write("PowerL")
-arcpy.MakeFeatureLayer_management("PowerL", "power_l")
+ap.MakeFeatureLayer_management("PowerL", "power_l")
 write("TeleL")
-arcpy.MakeFeatureLayer_management("TeleL", "tele_l")
+ap.MakeFeatureLayer_management("TeleL", "tele_l")
 write("PowerA")
-arcpy.MakeFeatureLayer_management("PowerA", "power_a")
+ap.MakeFeatureLayer_management("PowerA", "power_a")
 write("SubstatA")
-arcpy.MakeFeatureLayer_management("SubstatA", "substation_a")
+ap.MakeFeatureLayer_management("SubstatA", "substation_a")
 write("\n")
 
 
 ''''''''' Calculate Default Values '''''''''
 
+check_defense('out')
 # Calculate Default Values
 write("Calculating Default Values")
-arcpy.CalculateDefaultValues_defense(arcpy.env.workspace)
-write("\n")
+ap.CalculateDefaultValues_defense(ap.env.workspace)
+check_defense('in')
 
 
 ''''''''' Calculate Metrics '''''''''
@@ -1231,15 +1273,15 @@ write("\n")
 # metric_type = 'LENGTH;WIDTH;AREA'
 # for fc in featureclass:
 # 	try:
-# 		arcpy.AddMessage("Calculating AOO, ARA, LZN, and WID for " + str(fc))
-# 		arcpy.CalculateMetrics_defense(fc, metric_type, "LZN", "WID", "ARA", "#", "#", "#")
-# 		arcpy.CalculateMetrics_defense
-# 	except arcpy.ExecuteError:
+# 		ap.AddMessage("Calculating AOO, ARA, LZN, and WID for " + str(fc))
+# 		ap.CalculateMetrics_defense(fc, metric_type, "LZN", "WID", "ARA", "#", "#", "#")
+# 		ap.CalculateMetrics_defense
+# 	except ap.ExecuteError:
 # 		# if the code failed for the current fc, check the error
 # 		write("\n***Failed to run {0}.***\n".format(tool_name))
 # 		write("Error Report:")
 # 		write("~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~")
-# 		write(arcpy.GetMessages())
+# 		write(ap.GetMessages())
 # 		write("~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~")
 # 		sys.exit(0)
 
@@ -1248,18 +1290,18 @@ write("\n")
 
 # Integrating Utility surfaces and points to curves
 write("Integrating Utilities")
-arcpy.Integrate_management("power_p 2;substat_p 2;util_p 2;pipe_l 1;power_l 1;tele_l 1;power_a 3;substation_a 3", "0.03 Meters")
+ap.Integrate_management("power_p 2;substat_p 2;util_p 2;pipe_l 1;power_l 1;tele_l 1;power_a 3;substation_a 3", "0.03 Meters")
 write("")
 
 # Post Integration Repair
 write("Repairing Lines")
-arcpy.RepairGeometry_management("pipe_l", "DELETE_NULL")
-arcpy.RepairGeometry_management("power_l", "DELETE_NULL")
-arcpy.RepairGeometry_management("tele_l", "DELETE_NULL")
+ap.RepairGeometry_management("pipe_l", "DELETE_NULL")
+ap.RepairGeometry_management("power_l", "DELETE_NULL")
+ap.RepairGeometry_management("tele_l", "DELETE_NULL")
 write("\n")
 
 
 ''''''''' Repair for Good Measure '''''''''
 for fc in featureclass:
 	write("Repairing NULL geometries again in " + str(fc))
-	arcpy.RepairGeometry_management(fc, "DELETE_NULL")
+	ap.RepairGeometry_management(fc, "DELETE_NULL")
