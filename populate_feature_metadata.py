@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 # =======================+===== #
-# Populate Feature Metadata v10 #
-#      Nat Cagle 2022-08-16     #
+# Populate Feature Metadata v11 #
+#      Nat Cagle 2022-09-21     #
 # ========================+==== #
 import arcpy as ap
 from arcpy import AddMessage as write
@@ -53,7 +53,7 @@ def debug_view(**kwargs): # Input variable to view info in script output
 			return
 
 #-----------------------------------
-def update_uid():
+def update_uid(): # Iterate through all features and update the uid field with uuid4 random values
 	uid_total = 0
 	ap.AddWarning("\nThe Global Feature Identifier field that ESRI is 100% certain always \"provides sufficient combinations within a database and cannot be duplicated\" has, in fact, made quite a few duplicates.\nSince the field is a special type (and can't be duplicated), we aren't allowed to edit the values. But by some miracle, it keeps making the \"impossible\" duplicates...\n")
 	for fc in featureclass:
@@ -90,19 +90,27 @@ def update_uid():
 
 
 ''''''''' Parameters and Variables '''''''''
-MGCP = ap.GetParameterAsText(0) # Get MGCP dataset
-img_foot = ap.GetParameterAsText(1) # Get imagery footprint shapefile
+## [] Did you run the MGCP Finishing Tool yet? - Boolean
+run_fin_tool = ap.GetParameter(0) # Default: False
+## [] MGCP - Feature Dataset
+MGCP = ap.GetParameterAsText(1)
+## [] Current Year (YYYY) - String
 curr_year = ap.GetParameterAsText(2)
-run_fin_tool = ap.GetParameter(3) # Check you ran the MGCP Finishing Tool first.
-#actual_sdv = ap.GetParameter(3) # Option to still use the hard work I put into indentifying and updating spatially accurate feature source dates
-sdv_check = ap.GetParameter(4) # Update SDV from Imagery Footprint
-# Geonames date: Database most recent update on: https://geonames.nga.mil/gns/html
-geo_shp_check = ap.GetParameter(5) # Do you only have access to a Geonames shapefile in stead of a FC for some incredibly inconvenient reason?
-geo_file = ap.GetParameterAsText(6)
+## [] Update SDV from Imagery Footprint? - Boolean
+sdv_check = ap.GetParameter(3) # Default: True
+## [] Imagery Footprint Shapefile (merged) - Shapefile
+img_foot = ap.GetParameterAsText(4)
+## [] Was a Geonames source used? - Boolean
+geo_used = ap.GetParameter(5) # Default: False
+## [] Was the Geonames source a shapefile? - Boolean
+# Do you only have access to a Geonames shapefile in stead of a FC for some incredibly inconvenient reason?
+geo_shp_check = ap.GetParameter(6)  # Default: False
+## [] Geonames Point Feature Class (or shapefile if necessary) - Feature Class
+geo_file = ap.GetParameterAsText(7)
 
 if run_fin_tool == False:
 	write("\n\n\n**********************************************************")
-	write("Please run the MGCP Finishing Tool before Populate SDV and UID.")
+	write("Please run the MGCP Finishing Tool before Populate Feature Metadata.")
 	write("This will prevent NULL geometries from interfering with the SDV calculation.")
 	write("**********************************************************\n\n\n")
 	sys.exit(0)
@@ -117,72 +125,74 @@ featureclass.sort()
 error_event = 0
 
 
-write("\nImporting Geonames Source data...")
-geo_dates = []
-# Searches through the Geonames file modify dates and creates a list in the YYYY-MM-DD format
-geo_field_names = [f.name for f in ap.ListFields(geo_file)]
+if geo_used:
+	write("\nImporting Geonames Source data...")
+	geo_dates = []
+	# Searches through the Geonames file modify dates and creates a list in the YYYY-MM-DD format
+	geo_field_names = [f.name for f in ap.ListFields(geo_file)]
 
-if 'mod_dt_nm' in geo_field_names:
-	geo_field = 'mod_dt_nm'
-	with ap.da.SearchCursor(geo_file, geo_field) as scursor:
-		write("\nSearching Geonames feature class for date field.\nName: 'mod_dt_nm'\nAlias: 'Last Edited Date (name)'")
-		for srow in scursor:
-			date_field = srow[0]
-			if type(date_field) == dt:
-				date = date_field.strftime("%Y-%m-%d")
-				geo_dates.append(date)
-			else:
+	if 'mod_dt_nm' in geo_field_names:
+		geo_field = 'mod_dt_nm'
+		with ap.da.SearchCursor(geo_file, geo_field) as scursor:
+			write("\nSearching Geonames feature class for date field.\nName: 'mod_dt_nm'\nAlias: 'Last Edited Date (name)'")
+			for srow in scursor:
+				date_field = srow[0]
+				if type(date_field) == dt:
+					date = date_field.strftime("%Y-%m-%d")
+					geo_dates.append(date)
+				else:
+					feat_date = dt.strptime(date_field, "%m/%d/%Y")
+					date = feat_date.strftime("%Y-%m-%d")
+					geo_dates.append(date)
+
+	elif 'MODIFY_DATE' in geo_field_names:
+		geo_field = 'MODIFY_DATE'
+		with ap.da.SearchCursor(geo_file, geo_field) as geo:
+			write('\nSearching Geonames feature class for \'MODIFY_DATE\' field.')
+			for row in geo:
+				date_field = str(row[0])
 				feat_date = dt.strptime(date_field, "%m/%d/%Y")
 				date = feat_date.strftime("%Y-%m-%d")
 				geo_dates.append(date)
 
-elif 'MODIFY_DATE' in geo_field_names:
-	geo_field = 'MODIFY_DATE'
-	with ap.da.SearchCursor(geo_file, geo_field) as geo:
-		write('\nSearching Geonames feature class for \'MODIFY_DATE\' field.')
-		for row in geo:
-			date_field = str(row[0])
-			feat_date = dt.strptime(date_field, "%m/%d/%Y")
-			date = feat_date.strftime("%Y-%m-%d")
-			geo_dates.append(date)
-
-elif 'MODIFY_DAT' in geo_field_names:
-	if not geo_shp_check:
-		ap.AddError("**********************************************************")
-		ap.AddError("There was an issue with the Geonames Source feature class. Attempting to correct for broken field names...\n")
-		ap.AddError("It seems someone tried to just load a Geonames shapefile into a GDB instead of properly downloading the data from the NGA GEOnet Name Service. :]\nInconsistency in database standards is the leading cause of early heart failure in developers.\nExcel is not a database, and a shapefile is not a feature class. Do better.")
-		ap.AddError("**********************************************************")
-	geo_field = 'MODIFY_DAT'
-	with ap.da.SearchCursor(geo_file, geo_field) as geo:
-			write('\nSearching Geonames shapefile for \'MODIFY_DAT\' field.')
-			write("")
-			for row in geo:
-				date_field = row[0]
-				if type(date_field) == dt:
-					date = date_field.strftime("%Y-%m-%d")
-					geo_dates.append(date)
-					continue
-				else:
-					try:
-						feat_date = dt.strptime(date_field, "%m/%d/%Y")
-						date = feat_date.strftime("%Y-%m-%d")
+	elif 'MODIFY_DAT' in geo_field_names:
+		if not geo_shp_check:
+			ap.AddError("**********************************************************")
+			ap.AddError("There was an issue with the Geonames Source feature class. Attempting to correct for broken field names...\n")
+			ap.AddError("It seems someone tried to just load a Geonames shapefile into a GDB instead of properly downloading the data from the NGA GEOnet Name Service. :]\nInconsistency in database standards is the leading cause of early heart failure in developers.\nExcel is not a database, and a shapefile is not a feature class. Do better.")
+			ap.AddError("**********************************************************")
+		geo_field = 'MODIFY_DAT'
+		with ap.da.SearchCursor(geo_file, geo_field) as geo:
+				write('\nSearching Geonames shapefile for \'MODIFY_DAT\' field.')
+				write("")
+				for row in geo:
+					date_field = row[0]
+					if type(date_field) == dt:
+						date = date_field.strftime("%Y-%m-%d")
 						geo_dates.append(date)
-					except:
-						geo_dates.append(date_field)
+						continue
+					else:
+						try:
+							feat_date = dt.strptime(date_field, "%m/%d/%Y")
+							date = feat_date.strftime("%Y-%m-%d")
+							geo_dates.append(date)
+						except:
+							geo_dates.append(date_field)
 
-# Find newest Geonames modify dates
-geo_date_new = max(geo_dates)
-write("Latest NGA GEOnet Names Server (GNS) database update date: {0}".format(geo_date_new))
+	# Find newest Geonames modify dates
+	geo_date_new = max(geo_dates)
+	write("Latest NGA GEOnet Names Server (GNS) database update date: {0}".format(geo_date_new))
+else:
+	geo_date_new = None
 error_event += ap.GetMaxSeverity()
 
 
-
-''''''''' Update Spatial SDV Values '''''''''
 sdv_fields = ['sdv', 'OID@', 'SHAPE@'] #Source Date Value(SDV) field and the true centroid token of each feature to find which footprint it mostly overlaps
 fc_fields = ['acc', 'ccn', 'sdp', 'srt', 'txt', 'sdv']
 img_fields = ['Acquisitio', 'SHAPE@'] #Acquisition date for the imagery footprint polygons and the shape token for comparisons
 
 
+''''''''' Update Spatial SDV Values '''''''''
 if sdv_check:
 	for fc in featureclass:
 		if not get_count(fc):
@@ -247,37 +257,6 @@ if sdv_check:
 
 
 ''''''''' Update UFI Values '''''''''
-# Iterate through all features and update the uid field with uuid4 random values
-# uidcount = 0
-# for fc in featureclass:
-# 	feat_count = int(ap.GetCount_management(fc).getOutput(0))
-# 	if feat_count == 0:
-# 		continue
-# 	try:
-# 		with ap.da.SearchCursor(fc, 'uid') as scursor:
-# 			values = [row[0] for row in scursor]
-# 		with ap.da.UpdateCursor(fc, 'uid') as ucursor:
-# 			for row in ucursor:
-# 				if not populated(row[0]):
-# 					row[0] = str(uuid.uuid4())
-# 					uidcount += 1
-# 				elif values.count(row[0]) > 1:
-# 					row[0] = str(uuid.uuid4())
-# 					uidcount += 1
-# 				ucursor.updateRow(row)
-# 			write("Updated {0} MGCP UIDs in {1}".format(uidcount, fc))
-# 	except ap.ExecuteError:
-# 		# if the code failed for the current fc, check the error
-# 		error_count += 1
-# 		ap.AddError("\n***Failed to run {0}.***\n".format(tool_name))
-# 		ap.AddError("Error Report:")
-# 		ap.AddError("~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~")
-# 		ap.AddError(ap.GetMessages())
-# 		ap.AddError("~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~")
-# 		ap.AddError("\nPlease rerun the tool, but uncheck the {0} tool option. Either the feature class is too big or something else has gone wrong. Large data handling for tools other than Integration will be coming in a future update.".format(tool_name))
-# 		ap.AddError("Exiting tool.\n")
-# 		continue
-# 	error_event += ap.GetMaxSeverity()
 uid_total = 0
 uid_total = update_uid()
 
@@ -286,7 +265,7 @@ uid_total = update_uid()
 acc = 1 # If not already
 ccn = r"Copyright {0} by the National Geospatial-Intelligence Agency, U.S. Government. No domestic copyright claimed under Title 17 U.S.C. All rights reserved.".format(curr_year)
 sdp = "Very High Resolution Commercial Monoscopic Imagery"
-srt = 110
+srt = 110 # Very High Resolution Commercial Monoscopic Imagery
 txt = 'N_A' # Unless populated
 for fc in featureclass:
 	#write("Assigning {0} metadata to {1} feature class.".format(sdp, fc))
@@ -302,13 +281,14 @@ for fc in featureclass:
 				urow[4] = txt
 			if 'TextP' in fc:
 				urow[2] = "GeoNames"
-				urow[3] = 25
-				urow[5] = geo_date_new
+				urow[3] = 25 # GeoNames
+				if geo_used: urow[5] = geo_date_new
 			ucursor.updateRow(urow)
 
 
-
-write("\n\nUpdated feature SDV fields based on their spatial relation with the oldest respective, adjacent Imagery Footprint acquisition dates.")
+write("\n\n")
+if sdv_check:
+	write("Updated feature SDV fields based on their spatial relation with the oldest respective, adjacent Imagery Footprint acquisition dates.")
 write("All feature UID values have been updated.")
 write("Feature level metadata populated for {0}.\n\n".format(fc_fields))
 if error_event >= 2:
