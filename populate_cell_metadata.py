@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 # ========================== #
-# Populate MGCP Metadata v10 #
-#    Nat Cagle 2022-08-10    #
+# Populate MGCP Metadata v11 #
+#    Nat Cagle 2022-09-22    #
 # ========================== #
 import decimal
 import arcpy as ap
