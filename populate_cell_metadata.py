@@ -1,17 +1,20 @@
 # -*- coding: utf-8 -*-
 # ========================== #
-# Populate MGCP Metadata v11 #
-#    Nat Cagle 2022-09-22    #
+# Populate MGCP Metadata v12 #
+#    Nat Cagle 2022-09-29    #
 # ========================== #
-import decimal
-import arcpy as ap
 import sys
-import os
-from datetime import datetime as dt
+reload(sys)
+sys.setdefaultencoding('utf8')
 from arcpy import AddMessage as write
+import arcpy as ap
+from datetime import datetime as dt
+import decimal
+import os
 import re
 import uuid
 import traceback
+import xml.etree.ElementTree as et
 
 #            _______________________________
 #           | Populates the Metadata fields |
@@ -33,15 +36,15 @@ import traceback
 # Also, <W>, <E>, <S>, <N> need to be populated with values
 cell_default = {
 'CCMNT' : 'This cell is UNCLASSIFIED but not approved for public release. Data and derived products may be used for government purposes. NGA name and seal protected by 10 U.S.C. 425.',
-'CCRSID' : 'WGS 84 2D-Geographic East-North',
+'CCRSID' : 'WGS84E_2D', # 'WGS 84 2D-Geographic East-North'
 'CDCHAR' : 'utf8',
-'CDLANG' : 'English',
+'CDLANG' : 'eng',
 'CFFMTN' : 'SHAPEFILE',
 'CFFMTS' : 'ESRI Shapefile Technical Description - An ESRI White Paper',
 'CFFMTV' : 'July 1998',
 'CLSTAT' : '50k density feature extraction from monoscopic imagery using MGCP TRD v4.5.1. Ancillary source data used as needed to supplement the features not seen on imagery.',
 'CMCHAR' : 'utf8',
-'CMLANG' : 'English',
+'CMLANG' : 'eng',
 'CMPOCA' : 'NGA',
 'CMPOCC' : 'USA',
 'CMSEC' : 'unclassified',
@@ -54,7 +57,7 @@ cell_default = {
 'CSECCL' : 'unclassified',
 'CSERES' : 'MGCP',
 'CSHNDI' : 'Not for Public Release',
-'CURI' : 'https://www.mgcp.ws'
+'CURI' : 'https://www.mgcp.ws/'
 }
 
 subregion_default = {
@@ -63,12 +66,12 @@ subregion_default = {
 'SALEMT' : '998', # Long int for 'Not Applicable'. Could not clarify origin domain
 'SALEVL' : '-32765',
 'SDESCR' : 'Single subregion',
-'SFCATR' : 'MGCP Feature Catalogue 4.5.1',
-'SFCDTD' : 'TRD4.5.1 2019-07-05',
+'SFCATR' : 'MGCP_FeatureCatalogue_TRD4.5.1_20190705.xml', # 'MGCP Feature Catalogue 4.5.1'
+'SFCDTD' : '2019-07-05', # 'TRD4.5.1 2019-07-05'
 'SFCINC' : 'FALSE',
 'SLSTAT' : 'Initial collection using imagery.',
 'SMCHAR' : 'utf8',
-'SMLANG' : 'English',
+'SMLANG' : 'eng',
 'SMSEC' : 'unclassified',
 'SMSHND' : 'Not for Public Release',
 'SMSPLN' : 'Subregion',
@@ -85,7 +88,7 @@ subregion_default = {
 'SUBRID' : '01',
 'SUFONT' : 'Arial Unicode MS',
 'SVNAME' : 'GAIT',
-'SVSPCD' : 'TRD4.5.1 2019-07-05T00:00:00Z',
+'SVSPCD' : '2019-07-05T00:00:00Z', # 'TRD4.5.1 2019-07-05T00:00:00Z'
 'SVSPCN' : 'MGCP Technical Reference Documentation (TRD4v4.5.1)',
 'SVSTMT' : 'geometry conformant to specification',
 'SVVALD' : 'TRUE',
@@ -144,6 +147,8 @@ aafif_d = {
 
 
 
+''''''''' Functions '''''''''
+#-----------------------------------
 # Write information for given variable
 def write_info(name,var): # write_info('var_name',var)
 	write("~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~")
@@ -152,41 +157,113 @@ def write_info(name,var): # write_info('var_name',var)
 	write("   Assigned Value: {0}".format(var))
 	write("~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~")
 
+#-----------------------------------
+def namespace(element):
+	prefix = re.findall(r'\{.*\}', element.tag)
+	uri = re.findall(r'(?<=\}).*', element.tag)
+	return prefix[0], uri[0]
+
+#-----------------------------------
+def add_namespace(root, prefix, uri):
+		# In case of conflicting namespace definitions, first definition wins.
+		if prefix not in root._namespaces.keys():
+			root._namespaces[prefix] = uri
+			et.register_namespace(prefix, uri)
+
+#-----------------------------------
+# Original function by Giova Lomba 2019-07-27
+# https://stackoverflow.com/users/1375025/giova
+# https://github.com/GiovaLomba
+# Refactored for Python 2.7 and modified by Nat Cagle 2022-09-28
+def xml_render(root, buffer='', namespaces=None, level=0, indent_size=2, encoding='utf-8'):
+	if not level:
+		buffer += '<?xml version="1.0" encoding="{0}"?>\n'.format(encoding)
+	else:
+		buffer += ''
+	if isinstance(root, et.ElementTree):
+		root = root.getroot()
+	else:
+		root = root
+	if not level:
+		_, namespaces = et._namespaces(root, 'utf-8') #[0] #et._namespaces(root)
+	else:
+		_, namespaces = (None, namespaces)
+	print(root)
+	for element in root.getiterator():
+		indent = ' ' * indent_size * level
+		tag = re.sub(r'({[^}]+}\s*)*', '', element.tag)
+		buffer += '{0}<{1}'.format(indent, tag)
+		for ns in re.findall(r'{[^}]+}', element.tag):
+			ns_key = ns[1:-1]
+			if ns_key not in namespaces: continue
+			if namespaces[ns_key] != '':
+				buffer += ' xmlns' + ':{0}'.format(namespaces[ns_key]) + '="{0}"'.format(ns_key)
+			else:
+				buffer += ' xmlns' + '="{0}"'.format(ns_key)
+			del namespaces[ns_key]
+		for k, v in element.attrib.items():
+			buffer += ' {0}="{1}"'.format(k, v)
+		if element.text:
+			buffer += '>' + element.text.strip()
+		else:
+			buffer += '>'
+		children = list(element)
+		for child in children:
+			if buffer[-1] != '\n':
+				sep = '\n'
+			else:
+				sep = ''
+			buffer += sep + xml_render(child, level=level+1, indent_size=indent_size, namespaces=namespaces)
+		if 0 != len(children):
+			buffer += '{0}</{1}>\n'.format(indent, tag)
+		else:
+			buffer += '</{0}>\n'.format(tag)
+	return buffer
+
 
 
 ''''''''' User Parameters '''''''''
-
-# MGCP_Metadata dataset
+## [0] MGCP_Metadata Dataset - Feature Dataset
 MGCP = ap.GetParameterAsText(0)
 ap.env.workspace = MGCP
 ap.env.overwriteOutput = True
-# Check box to make a new cell polygon from given coordinates.
+## [1] Generate Cell Polygon? - Boolean # Default: True
 new_cell = ap.GetParameter(1)
-# Imagery Footprint
+## [2] Imagery Footprint (Original) - Shapefile
 img_foot = ap.GetParameterAsText(2)
-# TPC name to get cell coordinates
+## [3] TPC Coordinates (Cell ID - i.e. E018S07) - String
 TPC = ap.GetParameterAsText(3)
-# Checkbox "Leave attribute field blank for Edition 1. Populate with 'Complete Update' for Edition 2, 3, etc."
+## [4] Edition 1 Update? - Boolean # Default: True
+# "Leave attribute field blank for Edition 1. Populate with 'Complete Update' for Edition 2, 3, etc."
 update_edition = ap.GetParameter(4)
-# Dates
+## [5] Date the database was pulled local (Format as YYYY-MM-DD) - String
 local_date = ap.GetParameterAsText(5) # Date TPC was pulled local for finishing YYYY-MM-DD (for latest extraction date)
+## [6] Delivery Date (Format as YYYY-MM-DD) - String
 gait_date = ap.GetParameterAsText(6) # Delivery date (for date of final GAIT run)
+### Ancillary Sources
 # AAFIF
+## [7] Was an AAFIF source used? - Boolean # Default: False
 aafif_check = ap.GetParameter(7) # There is absolutely too much miscellaneous nonsense with this junk. Just find the date yourself and input it.
+## [8] Newest AAFIF Date (Format as YYYY-MM-DD) (Optional) - String
 aafif_date = ap.GetParameterAsText(8) # YYYY-MM-DD
 # DVOF
+## [9] Was a DVOF source used? - Boolean # Default: False
 dvof_check = ap.GetParameter(9) # Did you use DVOF checkbox
+## [10] Was the DVOF source a shapefile? (Optional) - Boolean # Default: False
 dvof_shp_check = ap.GetParameter(10) # Why can nothing ever be consistent. This is for if you only have a DVOF source shapefile (point only)
+## [11] DVOF Point Feature Class (or shapefile if necessary) (Optional) - Feature Class
 dvof_file = ap.GetParameterAsText(11)
-# Geonames date: Database most recent update on: https://geonames.nga.mil/gns/html
+# Geonames
+## [12] Was a Geonames source used? - Boolean # Default: False
 geo_check = ap.GetParameter(12) # Did you use geonames checkbox
+## [13] Was the Geonames source a shapefile? (Optional) - Boolean # Default: False
 geo_shp_check = ap.GetParameter(13) # Do you only have access to a Geonames shapefile in stead of a FC for some incredibly inconvenient reason?
+## [14] Geonames Point Feature Class (or shapefile if necessary) (Optional) - Feature Class
 geo_file = ap.GetParameterAsText(14)
 
 
 
 ''''''''' Feature Class List '''''''''
-
 # List and sort feature classes and give them their own variable for the later update cursors
 featureclass = ap.ListFeatureClasses()
 featureclass.sort()
@@ -200,7 +277,6 @@ cell_path = os.path.join(MGCP, fc_cell)
 
 
 ''''''''' User Error Handling '''''''''
-
 if len(featureclass) != 3:
 	ap.AddError("There should be 3 feature classes in the MGCP_Metadata dataset: Cell, Subregion, and Source.\nPlease repair the dataset and try again.")
 	sys.exit(0)
@@ -321,7 +397,6 @@ if geo_check:
 
 
 ''''''''' New Cell Generation '''''''''
-
 # Creates list of letters and numbers from TPC variable. ex: E018S07 -> ['E', '018', 'S', '07']
 start = re.findall('(\d+|[A-Za-z]+)', TPC)
 # Error handling for user input
@@ -367,7 +442,8 @@ if new_cell:
 		write('Coordinates for Cell generation acquired.')
 	else:
 		write('TPC name format invalid. Please try again.')
-		pause()
+		sys.exit(0)
+
 	# wn = [ws[0], ws[1]+1]
 	# en = [ws[0]+1, ws[1]+1]
 	# es = [ws[0]+1, ws[1]]
@@ -398,20 +474,6 @@ if new_cell:
 	ap.Append_management('bs_skware', fc_cell, 'NO_TEST','First','')
 	ap.Delete_management(os.path.join(MGCP, 'bs_skware'))
 
-	# Create a feature class with a spatial reference of GCS WGS 1984
-	#result = ap.management.CreateFeatureclass(MGCP, "bs_line_skware", "POLYLINE", spatial_reference=4326)
-	#feature_class = result[0]
-
-	# Write feature to new feature class
-	#with ap.da.InsertCursor(feature_class, ['SHAPE@']) as icursor:
-	#    icursor.insertRow([coords])
-
-	# Use the FeatureToPolygon function to form new areas
-	#ap.FeatureToPolygon_management('bs_line_skware', 'bs_skware')
-	#ap.Append_management('bs_skware', fc_cell, 'NO_TEST','First','')
-	#ap.Delete_management('bs_line_skware')
-	#ap.Delete_management('bs_skware')
-
 	write('\nConfirmation of Cell vertices at 1 degree intervals:')
 	with ap.da.SearchCursor(fc_cell, ["SHAPE@"]) as ucursor:
 		for row in ucursor:
@@ -428,7 +490,6 @@ if new_cell:
 
 
 ''''''''' Dictionary Updates '''''''''
-
 # Dynamic dictionary values updated per run with user values
 write("\nUpdating metadata dictionaries based on inputs and sources...\n")
 cell_default['CCDATE'] = local_date
@@ -491,13 +552,11 @@ if aafif_check or dvof_check or geo_check:
 
 
 ''''''''' Populate Secondary Metadata Tiles '''''''''
-
 ### Cell ###
-#for loop to append dictionary keys and values to blank lists if they don't match with current logic
+#-----------------------------------
 # Creates list of dictionary keys
 cell_fields = cell_default.keys()
 # If a cell polygon already exists and just needs to be updated (from Create New Cell checkbox)
-#if not new_cell:
 # Update cursor for cell feature class with the dictionary keys as the fields
 with ap.da.UpdateCursor(fc_cell, cell_fields) as ucursor:
 	write("\nPopulating Metadata Cell feature class geometry and attributes.")
@@ -508,45 +567,15 @@ with ap.da.UpdateCursor(fc_cell, cell_fields) as ucursor:
 			row[count] = cell_default[field]
 			count += 1
 		ucursor.updateRow(row)
+
 # Populates the gfid field using the uuid python function
 with ap.da.UpdateCursor(fc_cell, ['gfid']) as ucursor:
 	for row in ucursor:
 		row[0] = str(uuid.uuid4())
 		ucursor.updateRow(row)
 
-# With the way arcpy handles inserts and updates, it is unable to just assign the values
-# to the fields while also creating the cell shape. There for the generated cell acts as a temporary Polygon
-# This inserts a new feature with the correct field values
-#else:
-	# with ap.da.InsertCursor(fc_cell, cell_fields) as icursor:
-	# 	write("\nPopulating Metadata Cell feature class geometry and attributes.")
-	# 	# Creates a list of all the values in the dictionary based on their associated field keys from the list of dictionary keys
-	# 	values = [cell_default[x] for x in cell_fields]
-	# 	icursor.insertRow(values)
-	# # Next it applies the @SHAPE token from the temporary polygon
-	# with ap.da.UpdateCursor(fc_cell, ['OID@', 'SHAPE@', 'gfid']) as ucursor:
-	# 	first = 0
-	# 	# Determines which feature is the temp and which has the fields populated
-	# 	for row in ucursor:
-	# 		# Sets a variable with the @SHAPE token from the temp polygon
-	# 		if first == 0:
-	# 			temp_poly = row[1]
-	# 		# Sets the shape of any other features to the @SHAPE of the temp polygon
-	# 		if first != 0:
-	# 			row[1] = temp_poly
-	# 		first = 1
-	# 		# Populates the gfid field using the uuid python function
-	# 		row[2] = str(uuid.uuid4())
-	# 		ucursor.updateRow(row)
-	# # Deletes the temp polygon after it's shape has been used
-	# with ap.da.UpdateCursor(fc_cell, 'OID@') as ucursor:
-	# 	top_row = 0
-	# 	for row in ucursor:
-	# 		if top_row == 0:
-	# 			ucursor.deleteRow()
-	# 		top_row = 1
-
 ### Subregion ###
+#-----------------------------------
 # Creates list of dictionary keys
 sub_fields = subregion_default.keys()
 # Inserts a new feature with the values in the dictionary for the field keys
@@ -555,6 +584,7 @@ with ap.da.InsertCursor(fc_subregion, sub_fields) as icursor:
 	# Creates a list of all the values in the dictionary based on their associated field keys from the list of dictionary keys
 	values = [subregion_default[x] for x in sub_fields]
 	icursor.insertRow(values)
+
 # Updates the shape of the subregion polygon with the shape of the previous cell polygon
 with ap.da.UpdateCursor(fc_subregion, ['SHAPE@', 'gfid']) as ucursor:
 	for row in ucursor:
@@ -566,6 +596,7 @@ with ap.da.UpdateCursor(fc_subregion, ['SHAPE@', 'gfid']) as ucursor:
 		ucursor.updateRow(row)
 
 ### Source ###
+#-----------------------------------
 # Creates list of dictionary keys
 src_fields = new_imagery.keys()
 # Inserts new features for all specified sources with the values in the dictionary for the field keys
@@ -583,6 +614,7 @@ with ap.da.InsertCursor(fc_source, src_fields) as icursor:
 	if geo_check:
 		new_geo_vals = [new_geonames_d[x] for x in src_fields]
 		#old_geo_vals = [old_geonames_d[x] for x in src_fields]
+
 	# Inserts the features based on the source values defined above
 	icursor.insertRow(img_new_vals)
 	write("Created Newest Imagery Source feature")
@@ -602,6 +634,7 @@ with ap.da.InsertCursor(fc_source, src_fields) as icursor:
 		write("Created Newest Geonames Source feature")
 		#icursor.insertRow(old_geo_vals)
 		#write("Created Oldest Geonames Source feature")
+
 # Updates the shapes of the source polygons with the shape of the previous cell polygon
 with ap.da.UpdateCursor(fc_source, ['SHAPE@', 'gfid']) as ucursor:
 	for row in ucursor:
@@ -615,16 +648,44 @@ with ap.da.UpdateCursor(fc_source, ['SHAPE@', 'gfid']) as ucursor:
 
 
 ''''''''' Export XML Metadata '''''''''
-
 try:
 	# Checks out Defense Mapping extension
 	ap.CheckOutExtension("defense")
-	ap.AddWarning("\nExporting metadata to xml file. Path is located here:")
-	ap.AddWarning(export_path)
+	write("\nExporting metadata to XML file...")
 	# Runs Export MGCP XML Metadata tool from Defense Mapping using the cell path and the export path
 	ap.ExportMetadata_defense(cell_path, export_path)
+
+	write("Replacing misattributed 'MGCP_v4_r2' with 'MGCP_v4_r5.1' in the XML output.")
+	xml_out = os.path.join(export_path, TPC + '.xml')
+	xml_mod = os.path.join(export_path, TPC + '_mod.xml')
+	if os.path.exists(xml_mod):
+		write("Modified XML file already exists. Replacing modified XML with new version.")
+		os.remove(xml_mod)
+	old_trd = 'MGCP_v4_r2'
+	current_trd = 'MGCP_v4_r5.1'
+
+	with open(xml_out, 'r') as x_out, open(xml_mod, 'a') as x_mod:
+		line_num = 0
+		values_repaired = 0
+		while True:
+			line_num +=1
+			line = x_out.readline()
+			if line == '': break
+			if old_trd in line:
+				values_repaired +=1
+				line = line.replace(old_trd, current_trd)
+				write("~ Found '{0}' tag on line {1} ~".format(old_trd, line_num))
+			x_mod.write(line)
+	write("Replaced {0} '{1}' tags with '{2}'".format(values_repaired, old_trd, current_trd))
+
+	# Remove original metadata output and rename the modified one to match what it should be.
+	os.remove(xml_out)
+	os.rename(xml_mod, xml_out)
+
+	ap.AddWarning("\n\nXML file is located here:")
+	ap.AddWarning(xml_out)
 	ap.CheckInExtension("defense")
-	ap.AddWarning("\n==== Metadata construction is complete! ====\n")
+	ap.AddWarning("\n\n==== Metadata construction is complete! ====\n")
 except:
 	# Error handling. The Metadata dataset has to be in the GDB with a local copy of the data
 	ap.AddError("MGCP dataset must be in the GDB along with the MGCP_Metadata dataset.")
@@ -632,6 +693,9 @@ except:
 
 
 
+# ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ #
+#                                  Trash Pile                                  #
+# ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ #
 
 # THNOR = (1-a)*(1-b)*(1-c) (No source option checked)
 #     # 0 0 0 = 1
@@ -688,6 +752,359 @@ except:
 #  1 0 1  'Initial collection using imagery, AAFIF, and Geonames.'
 #  1 1 1  'Initial collection using imagery, AAFIF, DVOF, and Geonames.'
 
+
+#~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~#
+#~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~#
+
+
+# xml_out = os.path.join(export_path, TPC + '.xml') #r'C:\Projects\njcagle\finishing\====== L3Harris_MGCP ======\_documentation_run\Final GAIT\E124N07.xml'
+# xml_mod = os.path.join(export_path, TPC + '_mod.xml')
+#
+#
+# #----------------------------------------------------------------------
+#
+#
+# xml_out = os.path.join(export_path, TPC + '.xml')
+# with open(xml_out) as xml:
+# 	tree = et.parse(xml)
+# 	root = tree.getroot()
+# 	write("Replacing misattributed 'MGCP_v4_r2' with 'MGCP_v4_r5.1' in the XML output.")
+# 	for element in root.getiterator():
+# 		try:
+# 			element.text = element.text.replace('MGCP_v4_r2', 'MGCP_v4_r5.1')
+# 		except AttributeError:
+# 			pass
+# tree.write(xml_out)
+#
+#
+# #----------------------------------------------------------------------
+#
+#
+# metadata_ns = {
+# 	'gmd': 'http://www.isotc211.org/2005/gmd',
+# 	'gml': 'http://www.opengis.net/gml',
+# 	'gco': 'http://www.isotc211.org/2005/gco',
+# 	'gmx': 'http://www.isotc211.org/2005/gmx',
+# 	'xlink': 'http://www.w3.org/1999/xlink',
+# 	'mgcp': 'http://www.dgiwg.org/2005/mgcp'
+# }
+#
+# with open(xml_out) as xml:
+# 	tree = et.parse(xml)
+# 	root = tree.getroot()
+# 	tree.find('mgcp:MGCP_Cell/gmd:has/gmd:MD_Metadata/gmd:referenceSystemInfo/gmd:MD_ReferenceSystem/gmd:referenceSystemIdentifier/gmd:RS_Identifier/gmd:codeSpace/gco:CharacterString', metadata_ns).text = 'MGCP_v4_r5.1'
+# 	tree.find('mgcp:MGCP_Cell/gmd:has/gmd:MD_Metadata/gmd:identificationInfo/gmd:MD_DataIdentification/gmd:citation/gmd:CI_Citation/gmd:identifier/gmd:RS_Identifier/gmd:codeSpace/gco:CharacterString', metadata_ns).text = 'MGCP_v4_r5.1'
+# 	tree.find('mgcp:MGCP_Cell/mgcp:subregion/mgcp:MGCP_Subregion/mgcp:subregionMetadata/gmd:MD_Metadata/gmd:identificationInfo/gmd:MD_DataIdentification/gmd:citation/gmd:CI_Citation/gmd:identifier/gmd:RS_Identifier/gmd:codeSpace/gco:CharacterString', metadata_ns).text = 'MGCP_v4_r5.1'
+# 	tree.find('mgcp:MGCP_Cell/mgcp:subregion/mgcp:MGCP_Subregion/mgcp:subregionMetadata/gmd:MD_Metadata/gmd:dataQualityInfo/gmd:DQ_DataQuality/gmd:report/gmd:DQ_AbsoluteExternalPositionalAccuracy/gmd:measureIdentification/gmd:RS_Identifier/gmd:codeSpace/gco:CharacterString', metadata_ns).text = 'MGCP_v4_r5.1'
+# 	trd_code_space1 = tree.find('mgcp:MGCP_Cell/gmd:has/gmd:MD_Metadata/gmd:referenceSystemInfo/gmd:MD_ReferenceSystem/gmd:referenceSystemIdentifier/gmd:RS_Identifier/gmd:codeSpace/gco:CharacterString', metadata_ns)
+# 	trd_code_space2 = tree.find('mgcp:MGCP_Cell/gmd:has/gmd:MD_Metadata/gmd:identificationInfo/gmd:MD_DataIdentification/gmd:citation/gmd:CI_Citation/gmd:identifier/gmd:RS_Identifier/gmd:codeSpace/gco:CharacterString', metadata_ns)
+# 	trd_code_space3 = tree.find('mgcp:MGCP_Cell/mgcp:subregion/mgcp:MGCP_Subregion/mgcp:subregionMetadata/gmd:MD_Metadata/gmd:identificationInfo/gmd:MD_DataIdentification/gmd:citation/gmd:CI_Citation/gmd:identifier/gmd:RS_Identifier/gmd:codeSpace/gco:CharacterString', metadata_ns)
+# 	trd_code_space4 = tree.find('mgcp:MGCP_Cell/mgcp:subregion/mgcp:MGCP_Subregion/mgcp:subregionMetadata/gmd:MD_Metadata/gmd:dataQualityInfo/gmd:DQ_DataQuality/gmd:report/gmd:DQ_AbsoluteExternalPositionalAccuracy/gmd:measureIdentification/gmd:RS_Identifier/gmd:codeSpace/gco:CharacterString', metadata_ns)
+# 	print(trd_code_space1.text)
+# 	print(trd_code_space2.text)
+# 	print(trd_code_space3.text)
+# 	print(trd_code_space4.text)
+#
+#
+# #----------------------------------------------------------------------
+#
+#
+# # Original function by Giova Lomba 2019-07-27
+# # https://stackoverflow.com/users/1375025/giova
+# # https://github.com/GiovaLomba
+# # Refactored for Python 2.7 and modified by Nat Cagle 2022-09-28
+# def xml_render(root, buffer='', namespaces=None, level=0, indent_size=2, encoding='utf-8'):
+# 	if not level:
+# 		buffer += '<?xml version="1.0" encoding="{0}"?>\n'.format(encoding)
+# 	else:
+# 		buffer += ''
+# 	if isinstance(root, et.ElementTree):
+# 		root = root.getroot()
+# 	else:
+# 		root = root
+# 	if not level:
+# 		_, namespaces = et._namespaces(root, 'utf-8') #[0] #et._namespaces(root)
+# 	else:
+# 		_, namespaces = (None, namespaces)
+# 	print(root)
+# 	for element in root.getiterator():
+# 		indent = ' ' * indent_size * level
+# 		tag = re.sub(r'({[^}]+}\s*)*', '', element.tag)
+# 		buffer += '{0}<{1}'.format(indent, tag)
+# 		for ns in re.findall(r'{[^}]+}', element.tag):
+# 			ns_key = ns[1:-1]
+# 			if ns_key not in namespaces: continue
+# 			if namespaces[ns_key] != '':
+# 				buffer += ' xmlns' + ':{0}'.format(namespaces[ns_key]) + '="{0}"'.format(ns_key)
+# 			else:
+# 				buffer += ' xmlns' + '="{0}"'.format(ns_key)
+# 			del namespaces[ns_key]
+# 		for k, v in element.attrib.items():
+# 			buffer += ' {0}="{1}"'.format(k, v)
+# 		if element.text:
+# 			buffer += '>' + element.text.strip()
+# 		else:
+# 			buffer += '>'
+# 		children = list(element)
+# 		for child in children:
+# 			if buffer[-1] != '\n':
+# 				sep = '\n'
+# 			else:
+# 				sep = ''
+# 			buffer += sep + xml_render(child, level=level+1, indent_size=indent_size, namespaces=namespaces)
+# 		if 0 != len(children):
+# 			buffer += '{0}</{1}>\n'.format(indent, tag)
+# 		else:
+# 			buffer += '</{0}>\n'.format(tag)
+# 	return buffer
+#
+# tree = et.parse(xml_out)
+# root = tree.getroot()
+#
+# trd_code_space1 = root.find('{http://www.isotc211.org/2005/gmd}has/{http://www.isotc211.org/2005/gmd}MD_Metadata/{http://www.isotc211.org/2005/gmd}referenceSystemInfo/{http://www.isotc211.org/2005/gmd}MD_ReferenceSystem/{http://www.isotc211.org/2005/gmd}referenceSystemIdentifier/{http://www.isotc211.org/2005/gmd}RS_Identifier/{http://www.isotc211.org/2005/gmd}codeSpace/{http://www.isotc211.org/2005/gco}CharacterString')
+# trd_code_space2 = root.find('{http://www.isotc211.org/2005/gmd}has/{http://www.isotc211.org/2005/gmd}MD_Metadata/{http://www.isotc211.org/2005/gmd}identificationInfo/{http://www.isotc211.org/2005/gmd}MD_DataIdentification/{http://www.isotc211.org/2005/gmd}citation/{http://www.isotc211.org/2005/gmd}CI_Citation/{http://www.isotc211.org/2005/gmd}identifier/{http://www.isotc211.org/2005/gmd}RS_Identifier/{http://www.isotc211.org/2005/gmd}codeSpace/{http://www.isotc211.org/2005/gco}CharacterString')
+# trd_code_space3 = root.find('{http://www.dgiwg.org/2005/mgcp}subregion/{http://www.dgiwg.org/2005/mgcp}MGCP_Subregion/{http://www.dgiwg.org/2005/mgcp}subregionMetadata/{http://www.isotc211.org/2005/gmd}MD_Metadata/{http://www.isotc211.org/2005/gmd}identificationInfo/{http://www.isotc211.org/2005/gmd}MD_DataIdentification/{http://www.isotc211.org/2005/gmd}citation/{http://www.isotc211.org/2005/gmd}CI_Citation/{http://www.isotc211.org/2005/gmd}identifier/{http://www.isotc211.org/2005/gmd}RS_Identifier/{http://www.isotc211.org/2005/gmd}codeSpace/{http://www.isotc211.org/2005/gco}CharacterString')
+# trd_code_space4 = root.find('{http://www.dgiwg.org/2005/mgcp}subregion/{http://www.dgiwg.org/2005/mgcp}MGCP_Subregion/{http://www.dgiwg.org/2005/mgcp}subregionMetadata/{http://www.isotc211.org/2005/gmd}MD_Metadata/{http://www.isotc211.org/2005/gmd}dataQualityInfo/{http://www.isotc211.org/2005/gmd}DQ_DataQuality/{http://www.isotc211.org/2005/gmd}report/{http://www.isotc211.org/2005/gmd}DQ_AbsoluteExternalPositionalAccuracy/{http://www.isotc211.org/2005/gmd}measureIdentification/{http://www.isotc211.org/2005/gmd}RS_Identifier/{http://www.isotc211.org/2005/gmd}codeSpace/{http://www.isotc211.org/2005/gco}CharacterString')
+#
+# trd_code_space1.text = 'MGCP_v4_r5.1'
+# trd_code_space2.text = 'MGCP_v4_r5.1'
+# trd_code_space3.text = 'MGCP_v4_r5.1'
+# trd_code_space4.text = 'MGCP_v4_r5.1'
+#
+# with open(xml_mod, "w") as xml:
+# 	xml.write(xml_render(root))
+#
+#
+# #----------------------------------------------------------------------
+#
+#
+# import re
+# def namespace(element):
+# 	prefix = re.findall(r'\{.*\}', element.tag)
+# 	uri = re.findall(r'(?<=\}).*', element.tag)
+# 	return prefix[0], uri[0]
+#
+# def add_namespace(root, prefix, uri):
+#         # In case of conflicting namespace definitions, first definition wins.
+#         if prefix not in root._namespaces.keys():
+#             root._namespaces[prefix] = uri
+#             et.register_namespace(prefix, uri)
+#
+#
+# #----------------------------------------------------------------------
+# #################
+# #### WORKING ####
+# #################
+# # !_!‾!_!‾!_!‾!_!‾!_!‾!_!‾!_!‾!_!‾!_!‾!_!‾!_!‾!_!‾!_!‾!_!‾!_!‾!_!‾!_!‾!_!‾!_!‾!
+#
+# # -*- coding: utf-8 -*-
+# import sys
+# reload(sys)
+# sys.setdefaultencoding('utf8')
+#
+# xml_out = os.path.join(export_path, TPC + '.xml')
+# xml_mod = os.path.join(export_path, TPC + '_mod.xml')
+# old_trd = 'MGCP_v4_r2'
+# current_trd = 'MGCP_v4_r5.1'
+#
+# with open(xml_out, 'r') as x_out, open(xml_mod, 'a') as x_mod:
+#     while True:
+#         line = x_out.readline()
+#         if line == '': break
+#         if old_trd in line:
+#             line = line.replace(old_trd, current_trd)
+#             print("\n\n** Found {0}! **\n** Replaced with {1}. **\n\n".format(old_trd, current_trd))
+#         x_mod.write(line)
+#
+# # !_!‾!_!‾!_!‾!_!‾!_!‾!_!‾!_!‾!_!‾!_!‾!_!‾!_!‾!_!‾!_!‾!_!‾!_!‾!_!‾!_!‾!_!‾!_!‾!
+# #----------------------------------------------------------------------
+#
+#
+# et._namespaces(root, 'utf-8')
+# (	{'{http://www.isotc211.org/2005/gmd}CI_ResponsibleParty': 'ns1:CI_ResponsibleParty',
+# 	'{http://www.isotc211.org/2005/gmd}CI_Address': 'ns1:CI_Address',
+# 	'{http://www.isotc211.org/2005/gmd}dataQualityInfo': 'ns1:dataQualityInfo',
+# 	'{http://www.dgiwg.org/2005/mgcp}subregionCatalogue': 'ns0:subregionCatalogue',
+# 	'{http://www.isotc211.org/2005/gmd}title': 'ns1:title',
+# 	'{http://www.isotc211.org/2005/gmd}MD_SecurityConstraints': 'ns1:MD_SecurityConstraints',
+# 	'{http://www.isotc211.org/2005/gmd}code': 'ns1:code',
+# 	'{http://www.isotc211.org/2005/gmd}CI_Date': 'ns1:CI_Date',
+# 	'{http://www.isotc211.org/2005/gmd}DQ_ConformanceResult': 'ns1:DQ_ConformanceResult',
+# 	'{http://www.isotc211.org/2005/gmx}dataFile': 'ns3:dataFile',
+# 	'{http://www.isotc211.org/2005/gmx}featureTypes': 'ns3:featureTypes',
+# 	'{http://www.isotc211.org/2005/gmd}LI_Source': 'ns1:LI_Source',
+# 	'{http://www.isotc211.org/2005/gmd}metadataStandardName': 'ns1:metadataStandardName',
+# 	'{http://www.isotc211.org/2005/gmd}MD_RepresentativeFraction': 'ns1:MD_RepresentativeFraction',
+# 	'{http://www.isotc211.org/2005/gmd}citation': 'ns1:citation',
+# 	'{http://www.isotc211.org/2005/gmd}MD_GeometricObjects': 'ns1:MD_GeometricObjects',
+# 	'{http://www.isotc211.org/2005/gmd}lineage': 'ns1:lineage',
+# 	'{http://www.isotc211.org/2005/gco}Integer': 'ns2:Integer',
+# 	'{http://www.isotc211.org/2005/gmd}spatialRepresentationInfo': 'ns1:spatialRepresentationInfo',
+# 	'{http://www.isotc211.org/2005/gmd}geometricObjectCount': 'ns1:geometricObjectCount',
+# 	'{http://www.isotc211.org/2005/gco}Record': 'ns2:Record',
+# 	'{http://www.isotc211.org/2005/gmd}address': 'ns1:address',
+# 	'{http://www.isotc211.org/2005/gmd}MD_Constraints': 'ns1:MD_Constraints',
+# 	'{http://www.isotc211.org/2005/gmx}MimeFileType': 'ns3:MimeFileType',
+# 	'{http://www.isotc211.org/2005/gmd}source': 'ns1:source',
+# 	'{http://www.isotc211.org/2005/gmd}valueUnit': 'ns1:valueUnit',
+# 	'{http://www.isotc211.org/2005/gco}Date': 'ns2:Date',
+# 	'{http://www.isotc211.org/2005/gmx}Anchor': 'ns3:Anchor',
+# 	'{http://www.isotc211.org/2005/gmd}scaleDenominator': 'ns1:scaleDenominator',
+# 	'{http://www.isotc211.org/2005/gmd}CI_Contact': 'ns1:CI_Contact',
+# 	'{http://www.isotc211.org/2005/gmd}featureTypes': 'ns1:featureTypes',
+# 	'{http://www.isotc211.org/2005/gco}DateTime': 'ns2:DateTime',
+# 	'{http://www.isotc211.org/2005/gmd}level': 'ns1:level',
+# 	'{http://www.isotc211.org/2005/gmd}identifier': 'ns1:identifier',
+# 	'{http://www.isotc211.org/2005/gmd}identificationInfo': 'ns1:identificationInfo',
+# 	'{http://www.opengis.net/gml}LinearRing': 'ns5:LinearRing',
+# 	'{http://www.opengis.net/gml}posList': 'ns5:posList',
+# 	'{http://www.isotc211.org/2005/gmd}dataSetURI': 'ns1:dataSetURI',
+# 	'{http://www.isotc211.org/2005/gmd}includedWithDataset': 'ns1:includedWithDataset',
+# 	'{http://www.opengis.net/gml}id': 'ns5:id',
+# 	'{http://www.isotc211.org/2005/gmd}MD_FeatureCatalogueDescription': 'ns1:MD_FeatureCatalogueDescription',
+# 	'{http://www.isotc211.org/2005/gmd}report': 'ns1:report',
+# 	'{http://www.isotc211.org/2005/gmd}date': 'ns1:date',
+# 	'{http://www.dgiwg.org/2005/mgcp}MGCP_Cell': 'ns0:MGCP_Cell',
+# 	'{http://www.dgiwg.org/2005/mgcp}subregionMetadata': 'ns0:subregionMetadata',
+# 	'{http://www.isotc211.org/2005/gmd}metadataStandardVersion': 'ns1:metadataStandardVersion',
+# 	'{http://www.isotc211.org/2005/gmx}FileName': 'ns3:FileName',
+# 	'{http://www.isotc211.org/2005/gmd}hierarchyLevel': 'ns1:hierarchyLevel',
+# 	'{http://www.isotc211.org/2005/gmd}southBoundLatitude': 'ns1:southBoundLatitude',
+# 	'{http://www.isotc211.org/2005/gmd}measureDescription': 'ns1:measureDescription',
+# 	None: None,
+# 	'{http://www.isotc211.org/2005/gmd}MD_ClassificationCode': 'ns1:MD_ClassificationCode',
+# 	'{http://www.isotc211.org/2005/gmd}pass': 'ns1:pass',
+# 	'{http://www.isotc211.org/2005/gmd}organisationName': 'ns1:organisationName',
+# 	'{http://www.isotc211.org/2005/gmx}fileFormat': 'ns3:fileFormat',
+# 	'{http://www.dgiwg.org/2005/mgcp}subregion': 'ns0:subregion',
+# 	'{http://www.dgiwg.org/2005/mgcp}MGCP_AccuracyEvaluationMethod': 'ns0:MGCP_AccuracyEvaluationMethod',
+# 	'{http://www.isotc211.org/2005/gco}Boolean': 'ns2:Boolean',
+# 	'{http://www.isotc211.org/2005/gmd}polygon': 'ns1:polygon',
+# 	'{http://www.isotc211.org/2005/gmd}CI_DateTypeCode': 'ns1:CI_DateTypeCode',
+# 	'{http://www.isotc211.org/2005/gmd}distributionFormat': 'ns1:distributionFormat',
+# 	'{http://www.isotc211.org/2005/gmd}CI_Citation': 'ns1:CI_Citation',
+# 	'{http://www.isotc211.org/2005/gmd}complianceCode': 'ns1:complianceCode',
+# 	'{http://www.isotc211.org/2005/gmd}statement': 'ns1:statement',
+# 	'{http://www.isotc211.org/2005/gmd}dateType': 'ns1:dateType',
+# 	'src': 'src',
+# 	'{http://www.isotc211.org/2005/gmd}DQ_AbsoluteExternalPositionalAccuracy': 'ns1:DQ_AbsoluteExternalPositionalAccuracy',
+# 	'{http://www.isotc211.org/2005/gmd}geographicElement': 'ns1:geographicElement',
+# 	'{http://www.isotc211.org/2005/gmd}contentInfo': 'ns1:contentInfo',
+# 	'{http://www.isotc211.org/2005/gmd}equivalentScale': 'ns1:equivalentScale',
+# 	'{http://www.isotc211.org/2005/gmd}referenceSystemIdentifier': 'ns1:referenceSystemIdentifier',
+# 	'{http://www.isotc211.org/2005/gmd}DQ_QuantitativeResult': 'ns1:DQ_QuantitativeResult',
+# 	'{http://www.isotc211.org/2005/gmd}country': 'ns1:country',
+# 	'{http://www.isotc211.org/2005/gmx}fileType': 'ns3:fileType',
+# 	'{http://www.isotc211.org/2005/gmx}MX_DataFile': 'ns3:MX_DataFile',
+# 	'{http://www.isotc211.org/2005/gmd}MD_Metadata': 'ns1:MD_Metadata',
+# 	'{http://www.isotc211.org/2005/gmd}CI_RoleCode': 'ns1:CI_RoleCode',
+# 	'{http://www.isotc211.org/2005/gmd}result': 'ns1:result',
+# 	'{http://www.isotc211.org/2005/gmd}scope': 'ns1:scope',
+# 	'{http://www.isotc211.org/2005/gmd}MD_GeometricObjectTypeCode': 'ns1:MD_GeometricObjectTypeCode',
+# 	'{http://www.isotc211.org/2005/gmd}has': 'ns1:has',
+# 	'{http://www.isotc211.org/2005/gmd}hierarchyLevelName': 'ns1:hierarchyLevelName',
+# 	'{http://www.dgiwg.org/2005/mgcp}MGCP_VerticalSourceTypeId': 'ns0:MGCP_VerticalSourceTypeId',
+# 	'{http://www.isotc211.org/2005/gmd}metadataConstraints': 'ns1:metadataConstraints',
+# 	'{http://www.isotc211.org/2005/gmd}MD_Format': 'ns1:MD_Format',
+# 	'{http://www.isotc211.org/2005/gmd}resourceConstraints': 'ns1:resourceConstraints',
+# 	'{http://www.isotc211.org/2005/gmd}RS_Identifier': 'ns1:RS_Identifier',
+# 	'{http://www.isotc211.org/2005/gmd}supplementalInformation': 'ns1:supplementalInformation',
+# 	'{http://www.isotc211.org/2005/gmd}westBoundLongitude': 'ns1:westBoundLongitude',
+# 	'{http://www.isotc211.org/2005/gmd}CI_Series': 'ns1:CI_Series',
+# 	'{http://www.isotc211.org/2005/gmd}MD_RestrictionCode': 'ns1:MD_RestrictionCode',
+# 	'{http://www.isotc211.org/2005/gmd}language': 'ns1:language',
+# 	'{http://www.isotc211.org/2005/gmd}MD_Distribution': 'ns1:MD_Distribution',
+# 	'{http://www.isotc211.org/2005/gmd}characterSet': 'ns1:characterSet',
+# 	'type': 'type',
+# 	'{http://www.w3.org/1999/xlink}href': 'ns4:href',
+# 	'{http://www.isotc211.org/2005/gmd}MD_SpatialRepresentationTypeCode': 'ns1:MD_SpatialRepresentationTypeCode',
+# 	'{http://www.isotc211.org/2005/gco}CharacterString': 'ns2:CharacterString',
+# 	'{http://www.isotc211.org/2005/gmd}topicCategory': 'ns1:topicCategory',
+# 	'{http://www.isotc211.org/2005/gmd}extent': 'ns1:extent',
+# 	'{http://www.isotc211.org/2005/gmd}DQ_DataQuality': 'ns1:DQ_DataQuality',
+# 	'{http://www.isotc211.org/2005/gmd}specification': 'ns1:specification',
+# 	'{http://www.isotc211.org/2005/gmd}referenceSystemInfo': 'ns1:referenceSystemInfo',
+# 	'{http://www.isotc211.org/2005/gmd}EX_GeographicBoundingBox': 'ns1:EX_GeographicBoundingBox',
+# 	'{http://www.isotc211.org/2005/gmd}dateStamp': 'ns1:dateStamp',
+# 	'{http://www.dgiwg.org/2005/mgcp}MGCP_SourceTypeId': 'ns0:MGCP_SourceTypeId',
+# 	'{http://www.isotc211.org/2005/gmd}role': 'ns1:role',
+# 	'{http://www.isotc211.org/2005/gmd}denominator': 'ns1:denominator',
+# 	'{http://www.isotc211.org/2005/gmd}northBoundLatitude': 'ns1:northBoundLatitude',
+# 	'{http://www.isotc211.org/2005/gmd}measureIdentification': 'ns1:measureIdentification',
+# 	'{http://www.isotc211.org/2005/gmd}useConstraints': 'ns1:useConstraints',
+# 	'{http://www.isotc211.org/2005/gmd}geometricObjects': 'ns1:geometricObjects',
+# 	'{http://www.dgiwg.org/2005/mgcp}MGCP_ParticipantNation': 'ns0:MGCP_ParticipantNation',
+# 	'{http://www.isotc211.org/2005/gmd}EX_Extent': 'ns1:EX_Extent',
+# 	'{http://www.isotc211.org/2005/gmd}name': 'ns1:name',
+# 	'{http://www.isotc211.org/2005/gmd}geometricObjectType': 'ns1:geometricObjectType',
+# 	'{http://www.isotc211.org/2005/gmd}contactInfo': 'ns1:contactInfo',
+# 	'{http://www.isotc211.org/2005/gmd}spatialResolution': 'ns1:spatialResolution',
+# 	'{http://www.dgiwg.org/2005/mgcp}MGCP_LanguageCode': 'ns0:MGCP_LanguageCode',
+# 	'{http://www.isotc211.org/2005/gmd}series': 'ns1:series',
+# 	'{http://www.isotc211.org/2005/gmd}abstract': 'ns1:abstract',
+# 	'{http://www.isotc211.org/2005/gmd}evaluationMethodDescription': 'ns1:evaluationMethodDescription',
+# 	'{http://www.isotc211.org/2005/gmx}fileName': 'ns3:fileName',
+# 	'{http://www.dgiwg.org/2005/mgcp}MGCP_ParticipantAgency': 'ns0:MGCP_ParticipantAgency',
+# 	'{http://www.isotc211.org/2005/gmd}MD_ScopeCode': 'ns1:MD_ScopeCode',
+# 	'{http://www.isotc211.org/2005/gco}Decimal': 'ns2:Decimal',
+# 	'{http://www.isotc211.org/2005/gmd}contact': 'ns1:contact',
+# 	'{http://www.isotc211.org/2005/gmd}featureCatalogueCitation': 'ns1:featureCatalogueCitation',
+# 	'codeListValue': 'codeListValue',
+# 	'{http://www.isotc211.org/2005/gmd}pointOfContact': 'ns1:pointOfContact',
+# 	'{http://www.isotc211.org/2005/gmd}accessConstraints': 'ns1:accessConstraints',
+# 	'{http://www.isotc211.org/2005/gmd}MD_ReferenceSystem': 'ns1:MD_ReferenceSystem',
+# 	'id': 'id',
+# 	'{http://www.isotc211.org/2005/gmd}DQ_ConceptualConsistency': 'ns1:DQ_ConceptualConsistency',
+# 	'{http://www.isotc211.org/2005/gmd}version': 'ns1:version',
+# 	'{http://www.isotc211.org/2005/gmd}MD_CharacterSetCode': 'ns1:MD_CharacterSetCode',
+# 	'{http://www.isotc211.org/2005/gco}LocalName': 'ns2:LocalName',
+# 	'{http://www.isotc211.org/2005/gmd}distributionInfo': 'ns1:distributionInfo',
+# 	'{http://www.isotc211.org/2005/gmd}MD_DataIdentification': 'ns1:MD_DataIdentification',
+# 	'{http://www.opengis.net/gml}exterior': 'ns5:exterior',
+# 	'{http://www.isotc211.org/2005/gmd}explanation': 'ns1:explanation',
+# 	'{http://www.isotc211.org/2005/gmd}MD_Resolution': 'ns1:MD_Resolution',
+# 	'codeList': 'codeList',
+# 	'{http://www.isotc211.org/2005/gmd}useLimitation': 'ns1:useLimitation',
+# 	'{http://www.isotc211.org/2005/gmd}LI_Lineage': 'ns1:LI_Lineage',
+# 	'{http://www.isotc211.org/2005/gmx}fileDescription': 'ns3:fileDescription',
+# 	'{http://www.isotc211.org/2005/gmd}eastBoundLongitude': 'ns1:eastBoundLongitude',
+# 	'{http://www.isotc211.org/2005/gmd}handlingDescription': 'ns1:handlingDescription',
+# 	'{http://www.isotc211.org/2005/gmd}sourceCitation': 'ns1:sourceCitation',
+# 	'{http://www.isotc211.org/2005/gmd}DQ_Scope': 'ns1:DQ_Scope',
+# 	'{http://www.isotc211.org/2005/gmd}classification': 'ns1:classification',
+# 	'{http://www.isotc211.org/2005/gmd}value': 'ns1:value',
+# 	'{http://www.isotc211.org/2005/gmd}MD_LegalConstraints': 'ns1:MD_LegalConstraints',
+# 	'{http://www.isotc211.org/2005/gmd}MD_VectorSpatialRepresentation': 'ns1:MD_VectorSpatialRepresentation',
+# 	'{http://www.isotc211.org/2005/gmd}nameOfMeasure': 'ns1:nameOfMeasure',
+# 	'{http://www.opengis.net/gml}Polygon': 'ns5:Polygon',
+# 	'{http://www.dgiwg.org/2005/mgcp}MGCP_Subregion': 'ns0:MGCP_Subregion',
+# 	'{http://www.isotc211.org/2005/gmd}sourceExtent': 'ns1:sourceExtent',
+# 	'{http://www.isotc211.org/2005/gmd}otherConstraints': 'ns1:otherConstraints',
+# 	'{http://www.isotc211.org/2005/gmd}EX_BoundingPolygon': 'ns1:EX_BoundingPolygon',
+# 	'{http://www.isotc211.org/2005/gmd}dateTime': 'ns1:dateTime',
+# 	'{http://www.isotc211.org/2005/gmd}editionDate': 'ns1:editionDate',
+# 	'{http://www.isotc211.org/2005/gmd}codeSpace': 'ns1:codeSpace',
+# 	'{http://www.isotc211.org/2005/gmd}resourceFormat': 'ns1:resourceFormat',
+# 	'{http://www.isotc211.org/2005/gmd}MD_TopicCategoryCode': 'ns1:MD_TopicCategoryCode',
+# 	'{http://www.isotc211.org/2005/gmd}spatialRepresentationType': 'ns1:spatialRepresentationType'
+# 	},
+# 	{'http://www.isotc211.org/2005/gmx': 'ns3',
+# 	'http://www.isotc211.org/2005/gmd': 'ns1',
+# 	'http://www.opengis.net/gml': 'ns5',
+# 	'http://www.isotc211.org/2005/gco': 'ns2',
+# 	'http://www.dgiwg.org/2005/mgcp': 'ns0',
+# 	'http://www.w3.org/1999/xlink': 'ns4'}
+# )
+#
+# dir(et)
+# ['Comment', 'Element', 'ElementPath', 'ElementTree', 'HTML_EMPTY', 'PI', 'ParseError', 'ProcessingInstruction', 'QName', 'SubElement', 'TreeBuilder', 'VERSION', 'XML', 'XMLID', 'XMLParser', 'XMLTreeBuilder', '_Element', '_ElementInterface', '_IterParseIterator', '_SimpleElementPath', '__all__', '__builtins__', '__doc__', '__file__', '__name__', '__package__', '_encode', '_escape_attrib', '_escape_attrib_html', '_escape_cdata', '_namespace_map', '_namespaces', '_raise_serialization_error', '_sentinel', '_serialize', '_serialize_html', '_serialize_text', '_serialize_xml', 'dump', 'fromstring', 'fromstringlist', 'iselement', 'iterparse', 'parse', 're', 'register_namespace', 'sys', 'tostring', 'tostringlist', 'warnings']
+#
+# dir(et._namespaces)
+# ['__call__', '__class__', '__closure__', '__code__', '__defaults__', '__delattr__', '__dict__', '__doc__', '__format__', '__get__', '__getattribute__', '__globals__', '__hash__', '__init__', '__module__', '__name__', '__new__', '__reduce__', '__reduce_ex__', '__repr__', '__setattr__', '__sizeof__', '__str__', '__subclasshook__', 'func_closure', 'func_code', 'func_defaults', 'func_dict', 'func_doc', 'func_globals', 'func_name']
+
+
+#~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~#
+#~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~#
 
 
 ###### Making a skware in ArcMap trash heap ######
